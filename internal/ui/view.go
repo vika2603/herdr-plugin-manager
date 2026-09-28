@@ -300,7 +300,7 @@ func (m *model) viewList() string {
 	} else {
 		order := m.order.String()
 		if m.order == market.ByRelevance && m.filters[tabBrowse].Value() == "" {
-			order = market.ByStars.String()
+			order = market.ByPopular.String()
 		}
 		count = counted(len(m.visibleEntries()), len(m.entries), "plugin") + " · by " + order
 	}
@@ -469,6 +469,9 @@ func updateTarget(r updates.Result) string {
 func (m *model) browseItems() []string {
 	t := m.theme
 	entries := m.visibleEntries()
+	if src, ok := m.typedSource(); ok {
+		return m.empty("Not in the marketplace. Press enter to preview " + src.String() + " from GitHub.")
+	}
 	if len(entries) == 0 {
 		if m.indexLoading || m.indexErr != nil {
 			return nil

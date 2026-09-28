@@ -40,7 +40,7 @@ command = "vika2603.plugin-manager.open"
 description = "Manage plugins"
 ```
 
-只用命令行时，从 [releases](https://github.com/vika2603/herdr-plugin-manager/releases) 下载 `hpm`，
+只用命令行时，从 [releases](https://github.com/vika2603/herdr-plugin-manager/releases) 下载对应平台的压缩包，
 或运行 `go install github.com/vika2603/herdr-plugin-manager/cmd/hpm@latest`。
 
 ## 使用

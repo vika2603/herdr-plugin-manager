@@ -411,6 +411,33 @@ func TestInstallDetailShowsTheListingWhileThePreviewLoads(t *testing.T) {
 	}
 }
 
+func TestSearchPreviewsATypedSourceOutsideTheMarketplace(t *testing.T) {
+	b := newFake()
+	h := start(t, b)
+	h.press("tab", "/")
+	for _, r := range "dave/tool/plugin" {
+		h.press(string(r))
+	}
+	if !strings.Contains(h.screen(), "Press enter to preview dave/tool/plugin from GitHub") {
+		t.Fatalf("no hint for a source outside the marketplace:\n%s", h.screen())
+	}
+	h.press("enter")
+	if got := b.Calls(); len(got) != 1 || got[0] != `preview dave/tool/plugin ""` {
+		t.Errorf("calls = %q, want a preview of the typed source", got)
+	}
+
+	b = newFake()
+	h = start(t, b)
+	h.press("tab", "/")
+	for _, r := range "carol/gadget" {
+		h.press(string(r))
+	}
+	h.press("enter")
+	if got := b.Calls(); len(got) != 1 || !strings.HasPrefix(got[0], `preview carol/gadget "" hint`) {
+		t.Errorf("calls = %q, want the listed plugin opened from its listing", got)
+	}
+}
+
 func TestPreviewWithProblemsDoesNotInstall(t *testing.T) {
 	b := newFake()
 	b.preview.Problems = []string{"requires herdr 9.9.9, running 0.9.1"}

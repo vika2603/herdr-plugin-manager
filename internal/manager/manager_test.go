@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/vika2603/herdr-client/herdr"
@@ -312,6 +313,46 @@ func TestPreviewUsesTheHintOnlyWhenRefResolvesToIt(t *testing.T) {
 	defer mu.Unlock()
 	if p.Commit != head || !slices.ContainsFunc(paths, func(s string) bool { return strings.Contains(s, "/"+head+"/") }) {
 		t.Errorf("stale hint: commit %q, requests %q; want the manifest read at %s", p.Commit, paths, head)
+	}
+}
+
+// dirLister is a lister that also compares directories, reporting same for
+// every one and counting the comparisons.
+type dirLister struct {
+	fakeLister
+	same     bool
+	compared *atomic.Int32
+}
+
+func (d dirLister) SameDir(context.Context, string, string, string, string) (bool, error) {
+	d.compared.Add(1)
+	return d.same, nil
+}
+
+func TestCheckIgnoresCommitsOutsideTheSubdirectory(t *testing.T) {
+	installed := func(subdir string) herdr.InstalledPluginInfo {
+		return herdr.InstalledPluginInfo{PluginID: "o.r", Source: herdr.Some(herdr.PluginSourceInfo{
+			Kind: herdr.Some(herdr.PluginSourceKindGithub), Owner: herdr.Some("o"), Repo: herdr.Some("r"),
+			Subdir: herdr.Some(subdir), ResolvedCommit: herdr.Some(strings.Repeat("a", 40)),
+		})}
+	}
+	var compared atomic.Int32
+	lister := func(same bool) dirLister {
+		return dirLister{fakeLister: headAt(strings.Repeat("b", 40)), same: same, compared: &compared}
+	}
+
+	m := &Manager{Git: lister(true)}
+	if res, err := m.Check(context.Background(), installed("plugins/herdr")); err != nil || res.Kind != updates.UpToDate {
+		t.Errorf("commits outside the plugin: %v, %v; want up to date", res.Kind, err)
+	}
+	m = &Manager{Git: lister(false)}
+	if res, err := m.Check(context.Background(), installed("plugins/herdr")); err != nil || res.Kind != updates.Available {
+		t.Errorf("a change inside the plugin: %v, %v; want an update", res.Kind, err)
+	}
+	compared.Store(0)
+	m = &Manager{Git: lister(true)}
+	if res, _ := m.Check(context.Background(), installed("")); res.Kind != updates.Available || compared.Load() != 0 {
+		t.Errorf("a plugin at the root: %v after %d comparisons; want an update without comparing", res.Kind, compared.Load())
 	}
 }
 

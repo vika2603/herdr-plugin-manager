@@ -19,7 +19,7 @@ import (
 )
 
 // Version is the manager's version, kept equal to herdr-plugin.toml.
-const Version = "0.1.0"
+const Version = "0.1.1"
 
 // Name is the command name.
 const Name = "hpm"

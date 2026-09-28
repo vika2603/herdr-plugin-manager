@@ -41,7 +41,7 @@ command = "vika2603.plugin-manager.open"
 description = "Manage plugins"
 ```
 
-For the command line alone, download `hpm` from the
+For the command line alone, download the archive for your platform from the
 [releases](https://github.com/vika2603/herdr-plugin-manager/releases), or run
 `go install github.com/vika2603/herdr-plugin-manager/cmd/hpm@latest`.
 

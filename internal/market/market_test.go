@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -70,7 +71,7 @@ func TestEntriesFlattensManifests(t *testing.T) {
 func TestSort(t *testing.T) {
 	ix, _ := decodeIndex([]byte(sampleIndex))
 	entries := ix.Entries()
-	Sort(entries, ByStars)
+	Sort(entries, ByPopular)
 	if got := strings.Join(ids(entries), ","); got != "bob.board,alice.notify,alice.tools" {
 		t.Errorf("by stars: %s", got)
 	}
@@ -200,7 +201,7 @@ func TestSearchRanksNameAboveDescriptionAboveTopic(t *testing.T) {
 	if got != want {
 		t.Errorf("ranking:\n got %s\nwant %s", got, want)
 	}
-	if got := strings.Join(ids(Search(entries, "ssh", ByStars)), ","); !strings.HasPrefix(got, "d.contains,a.topic-only,b.repo-desc") {
+	if got := strings.Join(ids(Search(entries, "ssh", ByPopular)), ","); !strings.HasPrefix(got, "d.contains,a.topic-only,b.repo-desc") {
 		t.Errorf("an explicit order should override relevance: %s", got)
 	}
 }
@@ -244,5 +245,38 @@ func TestDecodeIndexSanitizesText(t *testing.T) {
 	}
 	if d := ix.Repositories[0].Description; strings.ContainsAny(d, "\x1b\x07") {
 		t.Fatalf("repository description keeps raw controls: %q", d)
+	}
+}
+
+func TestSortFollowsTheWebsite(t *testing.T) {
+	day := func(n int) time.Time { return time.Date(2026, 9, n, 0, 0, 0, 0, time.UTC) }
+	repos := []Repository{
+		// Big and steady: many stars, a gain below the trending minimum.
+		{Name: "big", Stars: 1000, StarsDelta7d: 9, CreatedAt: day(1), FirstSeenAt: day(20), PushedAt: day(2)},
+		// Small but doubling: the highest growth rate.
+		{Name: "rising", Stars: 20, StarsDelta7d: 10, CreatedAt: day(10), FirstSeenAt: day(11), PushedAt: day(3)},
+		// A larger gain but a lower rate than rising.
+		{Name: "growing", Stars: 200, StarsDelta7d: 50, CreatedAt: day(5), PushedAt: day(1)},
+		// As many stars as big, pushed more recently.
+		{Name: "fresh", Stars: 1000, CreatedAt: day(2), FirstSeenAt: day(3), PushedAt: day(9)},
+	}
+	entries := make([]Entry, len(repos))
+	for i := range repos {
+		entries[i] = Entry{Repo: &repos[i], Manifest: Manifest{ID: repos[i].Name, Name: repos[i].Name}}
+	}
+	for _, tt := range []struct {
+		by   Order
+		want string
+	}{
+		{ByPopular, "fresh,big,growing,rising"},
+		{ByTrending, "rising,growing,big,fresh"},
+		// growing has no firstSeenAt, so its creation date stands in.
+		{ByNewest, "big,rising,growing,fresh"},
+	} {
+		list := slices.Clone(entries)
+		Sort(list, tt.by)
+		if got := strings.Join(ids(list), ","); got != tt.want {
+			t.Errorf("%s: %s, want %s", tt.by, got, tt.want)
+		}
 	}
 }

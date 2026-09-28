@@ -128,6 +128,12 @@ type Lister interface {
 	List(ctx context.Context, cloneURL string) (Refs, error)
 }
 
+// DirComparer tells whether one directory of a remote repository differs
+// between two commits.
+type DirComparer interface {
+	SameDir(ctx context.Context, cloneURL, dir, a, b string) (bool, error)
+}
+
 var commitPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 // Check compares one installed plugin with its remote.
@@ -234,35 +240,80 @@ func latestRelease(tags map[string]string, prerelease bool) (tag, version string
 // its check instead of holding up the others.
 const listTimeout = 30 * time.Second
 
-// Git lists refs with the git command, which herdr already requires for
+// fetchTimeout bounds the tree fetch of SameDir.
+const fetchTimeout = time.Minute
+
+// Git reads remotes with the git command, which herdr already requires for
 // installs.
 type Git struct {
 	// Path is the git executable; empty means "git" on PATH.
 	Path string
 }
 
-// List runs `git ls-remote`. Terminal prompts are disabled so that a private
-// or missing repository fails instead of waiting for credentials.
+// List runs `git ls-remote`.
 func (g Git) List(ctx context.Context, cloneURL string) (Refs, error) {
+	ctx, cancel := context.WithTimeout(ctx, listTimeout)
+	defer cancel()
+	out, err := g.run(ctx, "ls-remote", "--symref", cloneURL)
+	if err != nil {
+		return Refs{}, err
+	}
+	return ParseLsRemote(out), nil
+}
+
+// SameDir reports whether dir holds the same files at commits a and b. It
+// fetches the two commits' trees, without file contents, into a scratch
+// repository that it removes afterwards. A dir missing at either commit is
+// an error.
+func (g Git) SameDir(ctx context.Context, cloneURL, dir, a, b string) (bool, error) {
+	tmp, err := os.MkdirTemp("", "hpm-git-")
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = os.RemoveAll(tmp) }()
+	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
+	defer cancel()
+	if _, err := g.run(ctx, "init", "-q", "--bare", tmp); err != nil {
+		return false, err
+	}
+	if _, err := g.run(ctx, "-C", tmp, "fetch", "-q", "--depth=1", "--filter=blob:none", "--no-tags", cloneURL, a, b); err != nil {
+		return false, err
+	}
+	var trees [2]string
+	for i, commit := range []string{a, b} {
+		out, err := g.run(ctx, "-C", tmp, "rev-parse", "--verify", "-q", commit+":"+dir)
+		if err != nil {
+			return false, fmt.Errorf("%s has no %s at %.12s", cloneURL, dir, commit)
+		}
+		trees[i] = strings.TrimSpace(out)
+	}
+	return trees[0] == trees[1], nil
+}
+
+// run runs git and returns its output. Terminal prompts are disabled so that
+// a private or missing repository fails instead of waiting for credentials.
+func (g Git) run(ctx context.Context, args ...string) (string, error) {
 	bin := g.Path
 	if bin == "" {
 		bin = "git"
 	}
-	ctx, cancel := context.WithTimeout(ctx, listTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, "ls-remote", "--symref", cloneURL) //nolint:gosec // git with a fixed subcommand; the URL is built by source.GitHub.
+	cmd := exec.CommandContext(ctx, bin, args...) //nolint:gosec // git with fixed subcommands; URLs come from source.GitHub and commits are checked hashes.
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	// git hands the transfer to git-remote-https, which inherits the output
+	// git hands a transfer to git-remote-https, which inherits the output
 	// pipe; without a delay, Wait could outlast the cancellation.
 	cmd.WaitDelay = time.Second
 	out, err := cmd.Output()
 	if err != nil {
-		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && len(exitErr.Stderr) > 0 {
-			return Refs{}, fmt.Errorf("git ls-remote %s: %s", cloneURL, strings.TrimSpace(string(exitErr.Stderr)))
+		name := "git " + args[0]
+		if args[0] == "-C" {
+			name = "git " + args[2]
 		}
-		return Refs{}, fmt.Errorf("git ls-remote %s: %w", cloneURL, err)
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && len(exitErr.Stderr) > 0 {
+			return "", fmt.Errorf("%s: %s", name, strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return "", fmt.Errorf("%s: %w", name, err)
 	}
-	return ParseLsRemote(string(out)), nil
+	return string(out), nil
 }
 
 // ParseLsRemote reads `git ls-remote --symref` output.

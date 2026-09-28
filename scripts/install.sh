@@ -12,15 +12,20 @@ case $arch in
 x86_64) arch=amd64 ;;
 aarch64) arch=arm64 ;;
 esac
-url=https://github.com/vika2603/herdr-plugin-manager/releases/download/v$version/hpm_${os}_${arch}
+url=https://github.com/vika2603/herdr-plugin-manager/releases/download/v$version/hpm_${os}_${arch}.tar.gz
 
-mkdir -p bin
-if curl -fsSL -o bin/hpm "$url"; then
-	chmod +x bin/hpm
-elif command -v go >/dev/null 2>&1; then
-	go build -o bin/hpm ./cmd/hpm
-else
-	rm -f bin/hpm
-	echo "cannot download $url, and Go is not installed to build hpm" >&2
-	exit 1
+# The new binary replaces bin/hpm by a rename, so an hpm that is running,
+# such as the one updating itself, keeps its own file.
+tmp=bin/.new
+rm -rf "$tmp"
+mkdir -p "$tmp"
+if ! { curl -fsSL -o "$tmp/hpm.tar.gz" "$url" && tar -xzf "$tmp/hpm.tar.gz" -C "$tmp" hpm; }; then
+	if ! command -v go >/dev/null 2>&1; then
+		rm -rf "$tmp"
+		echo "cannot download $url, and Go is not installed to build hpm" >&2
+		exit 1
+	fi
+	go build -o "$tmp/hpm" ./cmd/hpm
 fi
+mv -f "$tmp/hpm" bin/hpm
+rm -rf "$tmp"

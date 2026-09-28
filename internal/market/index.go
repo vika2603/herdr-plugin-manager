@@ -31,18 +31,22 @@ type Index struct {
 
 // Repository is one GitHub repository in the index.
 type Repository struct {
-	FullName    string     `json:"fullName"`
-	Owner       string     `json:"owner"`
-	Name        string     `json:"name"`
-	Description string     `json:"description"`
-	URL         string     `json:"url"`
-	Stars       int        `json:"stars"`
-	Language    string     `json:"language"`
-	Topics      []string   `json:"topics"`
-	CreatedAt   time.Time  `json:"createdAt"`
-	PushedAt    time.Time  `json:"pushedAt"`
-	HeadCommit  string     `json:"headCommit"`
-	Manifests   []Manifest `json:"manifests"`
+	FullName    string    `json:"fullName"`
+	Owner       string    `json:"owner"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	URL         string    `json:"url"`
+	Stars       int       `json:"stars"`
+	Language    string    `json:"language"`
+	Topics      []string  `json:"topics"`
+	CreatedAt   time.Time `json:"createdAt"`
+	PushedAt    time.Time `json:"pushedAt"`
+	// FirstSeenAt is when herdr.dev first indexed the repository.
+	FirstSeenAt time.Time `json:"firstSeenAt"`
+	// StarsDelta7d is the star gain over the last seven days.
+	StarsDelta7d int        `json:"starsDelta7d"`
+	HeadCommit   string     `json:"headCommit"`
+	Manifests    []Manifest `json:"manifests"`
 }
 
 // Manifest is the metadata the index keeps for one herdr-plugin.toml.
@@ -97,16 +101,21 @@ func Find(entries []Entry, key string) (Entry, bool) {
 type Order int
 
 // Orders offered for browsing: relevance to the search terms, then the
-// orders of the marketplace website.
+// orders of the marketplace website, which they follow.
 const (
 	ByRelevance Order = iota
-	ByStars
+	ByPopular
+	ByTrending
 	ByRecent
 	ByNewest
 	ByName
 )
 
-var orderNames = []string{"relevance", "stars", "recent", "newest", "name"}
+var orderNames = []string{"relevance", "popular", "trending", "recent", "newest", "name"}
+
+// trendingMinGain is the weekly star gain the marketplace website requires
+// before it ranks a repository by growth rate.
+const trendingMinGain = 10
 
 func (o Order) String() string { return orderNames[o] }
 
@@ -121,7 +130,7 @@ func ParseOrder(name string) (Order, bool) {
 
 // Sort orders entries in place. Ties fall back to the plugin id so the order
 // is stable across refreshes. Relevance needs search terms, so without them
-// it sorts by stars; Search ranks by relevance.
+// it sorts by popularity; Search ranks by relevance.
 func Sort(entries []Entry, by Order) {
 	slices.SortStableFunc(entries, func(a, b Entry) int { return compareBy(a, b, by) })
 }
@@ -129,12 +138,15 @@ func Sort(entries []Entry, by Order) {
 func compareBy(a, b Entry, by Order) int {
 	var c int
 	switch by {
-	case ByRelevance, ByStars:
-		c = cmp.Compare(b.Repo.Stars, a.Repo.Stars)
+	case ByRelevance, ByPopular:
+		c = cmp.Or(cmp.Compare(b.Repo.Stars, a.Repo.Stars), b.Repo.PushedAt.Compare(a.Repo.PushedAt))
+	case ByTrending:
+		c = cmp.Or(cmp.Compare(trendingScore(b.Repo), trendingScore(a.Repo)),
+			cmp.Compare(b.Repo.StarsDelta7d, a.Repo.StarsDelta7d), cmp.Compare(b.Repo.Stars, a.Repo.Stars))
 	case ByRecent:
 		c = b.Repo.PushedAt.Compare(a.Repo.PushedAt)
 	case ByNewest:
-		c = b.Repo.CreatedAt.Compare(a.Repo.CreatedAt)
+		c = listedAt(b.Repo).Compare(listedAt(a.Repo))
 	case ByName:
 		c = strings.Compare(strings.ToLower(a.Manifest.Name), strings.ToLower(b.Manifest.Name))
 	}
@@ -142,4 +154,22 @@ func compareBy(a, b Entry, by Order) int {
 		return c
 	}
 	return strings.Compare(a.Manifest.ID, b.Manifest.ID)
+}
+
+// trendingScore is the weekly star gain relative to the stars before it, or
+// -1 below the minimum gain.
+func trendingScore(r *Repository) float64 {
+	if r.StarsDelta7d < trendingMinGain {
+		return -1
+	}
+	return float64(r.StarsDelta7d) / float64(max(r.Stars-r.StarsDelta7d, 1))
+}
+
+// listedAt is when the repository joined the marketplace; older indexes
+// lack that, and its creation on GitHub stands in.
+func listedAt(r *Repository) time.Time {
+	if r.FirstSeenAt.IsZero() {
+		return r.CreatedAt
+	}
+	return r.FirstSeenAt
 }

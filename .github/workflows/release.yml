@@ -30,7 +30,9 @@ jobs:
           mkdir dist
           for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64; do
             os=${target%/*} arch=${target#*/}
-            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags="-s -w" -o "dist/hpm_${os}_${arch}" ./cmd/hpm
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags="-s -w" -o dist/hpm ./cmd/hpm
+            tar -czf "dist/hpm_${os}_${arch}.tar.gz" -C dist hpm
+            rm dist/hpm
           done
       - name: Publish
         env:

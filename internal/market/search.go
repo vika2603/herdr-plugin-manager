@@ -119,7 +119,7 @@ func Search(entries []Entry, query string, by Order) []Entry {
 			if c := cmp.Compare(b.score, a.score); c != 0 {
 				return c
 			}
-			return compareBy(a.entry, b.entry, ByStars)
+			return compareBy(a.entry, b.entry, ByPopular)
 		})
 	}
 	out := make([]Entry, len(hits))

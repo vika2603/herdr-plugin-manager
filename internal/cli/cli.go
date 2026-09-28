@@ -151,7 +151,7 @@ func (c *cli) searchCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			order, ok := market.ParseOrder(sortBy)
 			if !ok {
-				return fmt.Errorf("unknown sort order %q (relevance, stars, recent, newest, name)", sortBy)
+				return fmt.Errorf("unknown sort order %q (relevance, popular, trending, recent, newest, name)", sortBy)
 			}
 			ctx := cmd.Context()
 			ix, err := c.loadIndex(ctx, refresh)
@@ -212,7 +212,7 @@ func (c *cli) searchCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&sortBy, "sort", "relevance", "order: relevance (stars without a query), stars, recent, newest or name")
+	cmd.Flags().StringVar(&sortBy, "sort", "relevance", "order: relevance (popular without a query), popular, trending, recent, newest or name")
 	cmd.Flags().IntVar(&limit, "limit", 20, "maximum number of results; 0 for all")
 	cmd.Flags().BoolVar(&refresh, "refresh", false, "download the index even if the cached copy is fresh")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print results as JSON")
@@ -236,11 +236,11 @@ func (c *cli) infoCmd() *cobra.Command {
 					return nil
 				}
 			}
-			src, err := c.resolve(ctx, args[0])
+			src, hint, err := c.resolve(ctx, args[0], ref)
 			if err != nil {
 				return err
 			}
-			preview, err := c.m.Preview(ctx, src, ref, "", c.m.HerdrVersion(ctx), plugins)
+			preview, err := c.m.Preview(ctx, src, ref, hint, c.m.HerdrVersion(ctx), plugins)
 			if err != nil {
 				return err
 			}
@@ -291,7 +291,7 @@ func (c *cli) installCmd() *cobra.Command {
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			src, err := c.resolve(ctx, args[0])
+			src, hint, err := c.resolve(ctx, args[0], ref)
 			if err != nil {
 				return err
 			}
@@ -299,7 +299,7 @@ func (c *cli) installCmd() *cobra.Command {
 			if err != nil {
 				fmt.Fprintf(c.errOut, "warning: could not list installed plugins: %v\n", err)
 			}
-			preview, err := c.m.Preview(ctx, src, ref, "", c.m.HerdrVersion(ctx), plugins)
+			preview, err := c.m.Preview(ctx, src, ref, hint, c.m.HerdrVersion(ctx), plugins)
 			if err != nil {
 				return err
 			}
@@ -380,7 +380,8 @@ func (c *cli) outdatedCmd() *cobra.Command {
 		Short: "Check installed GitHub plugins for updates",
 		Long: "Compare each GitHub-installed plugin with its remote. A plugin installed from a\n" +
 			"release tag is compared with the newest release tag; one installed from a branch\n" +
-			"or the default branch with that branch's current commit. Commit pins are skipped.",
+			"or the default branch with that branch's current commit; for a plugin in a\n" +
+			"subdirectory, only commits that change the subdirectory count. Commit pins are skipped.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
@@ -552,20 +553,39 @@ func (c *cli) logsCmd() *cobra.Command {
 }
 
 // resolve turns a plugin id from the marketplace or an owner/repo[/subdir]
-// source into a GitHub source.
-func (c *cli) resolve(ctx context.Context, arg string) (source.GitHub, error) {
+// source into a GitHub source. For the default branch it also returns the
+// head commit the marketplace index recorded, which Preview reads the
+// manifest at while it resolves the branch; a source is only looked up in an
+// index already cached, since downloading one would cost more than it saves.
+func (c *cli) resolve(ctx context.Context, arg, ref string) (source.GitHub, string, error) {
+	var (
+		src source.GitHub
+		ix  *market.Index
+		err error
+	)
 	if strings.Contains(arg, "/") {
-		return source.Parse(arg)
+		if src, err = source.Parse(arg); err != nil {
+			return source.GitHub{}, "", err
+		}
+		ix, _ = c.m.Market.Cached()
+		arg = src.String()
+	} else if ix, err = c.loadIndex(ctx, false); err != nil {
+		return source.GitHub{}, "", err
 	}
-	ix, err := c.loadIndex(ctx, false)
-	if err != nil {
-		return source.GitHub{}, err
+	var e market.Entry
+	found := false
+	if ix != nil {
+		e, found = market.Find(ix.Entries(), arg)
 	}
-	e, ok := market.Find(ix.Entries(), arg)
-	if !ok {
-		return source.GitHub{}, fmt.Errorf("no marketplace plugin has id %q; give its owner/repo[/subdir] source instead", arg)
+	switch {
+	case found && ref == "":
+		return e.Source, e.Repo.HeadCommit, nil
+	case found:
+		return e.Source, "", nil
+	case src.Repo != "":
+		return src, "", nil
 	}
-	return e.Source, nil
+	return source.GitHub{}, "", fmt.Errorf("no marketplace plugin has id %q; give its owner/repo[/subdir] source instead", arg)
 }
 
 func (c *cli) loadIndex(ctx context.Context, refresh bool) (*market.Index, error) {

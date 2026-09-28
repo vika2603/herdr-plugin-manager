@@ -486,6 +486,18 @@ func (m *model) visibleEntries() []market.Entry {
 	return c.result
 }
 
+// typedSource is an owner/repo[/subdir] typed into the marketplace search
+// that no listing matches. enter previews it straight from GitHub, which is
+// how a plugin outside the index is installed.
+func (m *model) typedSource() (source.GitHub, bool) {
+	query := strings.TrimSpace(m.filters[tabBrowse].Value())
+	if !strings.Contains(query, "/") || strings.ContainsAny(query, " \t") || len(m.visibleEntries()) > 0 {
+		return source.GitHub{}, false
+	}
+	src, err := source.Parse(query)
+	return src, err == nil
+}
+
 // sortEntries orders the marketplace list by the current order.
 func (m *model) sortEntries() {
 	market.Sort(m.entries, m.order)

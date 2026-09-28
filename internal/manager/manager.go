@@ -293,9 +293,21 @@ func (m *Manager) Update(ctx context.Context, p herdr.InstalledPluginInfo, res u
 	return nil
 }
 
-// Check looks for an update of one plugin.
+// Check compares one installed plugin with its remote. For a plugin in a
+// subdirectory, new commits count only when they change that directory: the
+// rest of the repository is often another project, or other plugins.
 func (m *Manager) Check(ctx context.Context, p herdr.InstalledPluginInfo) (updates.Result, error) {
-	return updates.Check(ctx, m.Git, p)
+	res, err := updates.Check(ctx, m.Git, p)
+	dirs, ok := m.Git.(updates.DirComparer)
+	if err != nil || !ok || res.Kind != updates.Available || res.Source.Subdir == "" ||
+		!updates.IsCommit(res.CurrentCommit) || !updates.IsCommit(res.TargetCommit) {
+		return res, err
+	}
+	// When the comparison fails, the update stands.
+	if same, err := dirs.SameDir(ctx, res.Source.CloneURL(), res.Source.Subdir, res.CurrentCommit, res.TargetCommit); err == nil && same {
+		res.Kind = updates.UpToDate
+	}
+	return res, nil
 }
 
 // Checked is the outcome of checking one plugin in CheckAll.

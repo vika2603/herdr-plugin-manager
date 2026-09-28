@@ -371,6 +371,9 @@ func (m *model) keyBrowse(k string) (tea.Model, tea.Cmd) {
 		if c := m.cursor[tabBrowse]; c < len(entries) {
 			return m, m.openInstall(entries[c])
 		}
+		if src, ok := m.typedSource(); ok {
+			return m, m.openPreview(src.String(), &installTarget{src: src}, nil)
+		}
 	}
 	return m, nil
 }
@@ -477,9 +480,19 @@ func (m *model) openInstall(e market.Entry) tea.Cmd {
 	if name == "" {
 		name = e.Manifest.ID
 	}
-	d := &detail{crumb: tabNames[tabBrowse], title: name, loading: true, install: &installTarget{src: e.Source}, entry: &e}
+	return m.openPreview(name, &installTarget{src: e.Source}, &e)
+}
+
+// openPreview opens the install preview of t, starting from the
+// marketplace listing when there is one.
+func (m *model) openPreview(title string, t *installTarget, e *market.Entry) tea.Cmd {
+	var hint string
+	if e != nil {
+		hint = e.Repo.HeadCommit
+	}
+	d := &detail{crumb: tabNames[tabBrowse], title: title, loading: true, install: t, entry: e}
 	m.detail, m.screen = d, screenDetail
-	return m.withSpinner(m.loadPreview(d, e.Source, "", e.Repo.HeadCommit))
+	return m.withSpinner(m.loadPreview(d, t.src, "", hint))
 }
 
 func (m *model) openUpdate(p herdr.InstalledPluginInfo) tea.Cmd {

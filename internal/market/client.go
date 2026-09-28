@@ -86,6 +86,12 @@ func (c *Client) Load(ctx context.Context, refresh bool) (*Index, Status, error)
 	return nil, Status{}, fmt.Errorf("download plugin index: %w", err)
 }
 
+// Cached returns the cached index however old it is, without downloading.
+func (c *Client) Cached() (*Index, bool) {
+	ix, _, err := c.readCache()
+	return ix, err == nil
+}
+
 // Manifest downloads and validates the manifest of src at ref, which may be a
 // branch, tag, commit or empty for the default branch. Validation applies the
 // rules herdr applies when it loads the manifest; warnings are returned
