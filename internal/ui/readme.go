@@ -51,6 +51,8 @@ func (m *model) switchView(d *detail) tea.Cmd {
 		return nil
 	}
 	switch {
+	case d.install != nil && d.preview != nil:
+		return m.withSpinner(m.loadRemoteReadme(d, d.install.src, d.preview.Commit))
 	case d.install != nil:
 		return m.withSpinner(m.loadRemoteReadme(d, d.install.src, ""))
 	case d.update != nil:

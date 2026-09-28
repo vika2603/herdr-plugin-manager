@@ -121,10 +121,15 @@ func (h *harness) ran(prefix string) bool {
 	return false
 }
 
-type lister struct{}
+// lister reports every remote with its default branch and tags at head.
+type lister struct{ tags []string }
 
-func (lister) List(context.Context, string) (updates.Refs, error) {
-	return updates.Refs{Head: head, Branches: map[string]string{"main": head}, Tags: map[string]string{}}, nil
+func (l lister) List(context.Context, string) (updates.Refs, error) {
+	tags := map[string]string{}
+	for _, t := range l.tags {
+		tags[t] = head
+	}
+	return updates.Refs{Head: head, HeadBranch: "main", Branches: map[string]string{"main": head}, Tags: tags}, nil
 }
 
 type redirect struct{ target string }
@@ -157,6 +162,21 @@ func TestInstallAsksFirst(t *testing.T) {
 	}
 	if !h.ran("plugin install carol/gadget --yes") {
 		t.Errorf("herdr was not asked to install: %q", h.calls())
+	}
+}
+
+func TestInstallTakesTheReleaseThePreviewShowed(t *testing.T) {
+	h := newHarness(t)
+	h.m.Git = lister{tags: []string{"v0.1.0", "v0.2.0"}}
+	out, _, err := h.run("", false, "install", "carol.gadget", "--yes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "@ v0.2.0") {
+		t.Errorf("the preview does not name the release:\n%s", out)
+	}
+	if !h.ran("plugin install carol/gadget --ref v0.2.0 --yes") {
+		t.Errorf("herdr was not asked for the release: %q", h.calls())
 	}
 }
 

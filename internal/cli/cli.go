@@ -248,7 +248,7 @@ func (c *cli) infoCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&ref, "ref", "", "branch, tag or commit to preview (default: the default branch)")
+	cmd.Flags().StringVar(&ref, "ref", "", "branch, tag or commit to preview (default: what install would pick)")
 	return cmd
 }
 
@@ -310,10 +310,10 @@ func (c *cli) installCmd() *cobra.Command {
 			if err := c.confirm(yes, "Install "+preview.Manifest.ID+"?"); err != nil {
 				return err
 			}
-			return c.m.Install(ctx, src, ref, preview.Commit, c.out)
+			return c.m.Install(ctx, src, preview.Ref, preview.Commit, c.out)
 		},
 	}
-	cmd.Flags().StringVar(&ref, "ref", "", "branch, tag or commit to install (default: the default branch)")
+	cmd.Flags().StringVar(&ref, "ref", "", "branch, tag or commit to install (default: the latest release of a plugin at the repository root, else the default branch)")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "install without asking")
 	return cmd
 }

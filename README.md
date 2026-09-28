@@ -48,7 +48,10 @@ For the command line alone, download the archive for your platform from the
 ## Usage
 
 Open the popup, or run `hpm` with no arguments for the same interface in the
-terminal. Press `?` for every key.
+terminal. Press `?` for every key; the mouse scrolls, and a click selects,
+then opens. An install takes the latest release of a plugin at the root of
+its repository, else the default branch; press `v` in the preview to choose
+another version.
 
 | Command | Does |
 | --- | --- |

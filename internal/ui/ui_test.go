@@ -148,6 +148,9 @@ func (f *fakeBackend) Preview(_ context.Context, src source.GitHub, ref, hint, _
 		break
 	}
 	p := *f.preview
+	if ref != "" {
+		p.Ref = ref
+	}
 	if src.Owner == "o" {
 		mf := *p.Manifest
 		mf.ID = src.Repo
@@ -400,7 +403,7 @@ func TestInstallDetailShowsTheListingWhileThePreviewLoads(t *testing.T) {
 	h.press("tab")
 	_, cmd := h.m.Update(keyMsg("enter"))
 	out := h.screen()
-	for _, want := range []string{"Gadget 0.1.0 (carol.gadget)", "source: carol/gadget @ default branch"} {
+	for _, want := range []string{"Gadget 0.1.0 (carol.gadget)", "source: carol/gadget"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("before the preview arrives the detail lacks %q:\n%s", want, out)
 		}
@@ -435,6 +438,30 @@ func TestSearchPreviewsATypedSourceOutsideTheMarketplace(t *testing.T) {
 	h.press("enter")
 	if got := b.Calls(); len(got) != 1 || !strings.HasPrefix(got[0], `preview carol/gadget "" hint`) {
 		t.Errorf("calls = %q, want the listed plugin opened from its listing", got)
+	}
+}
+
+func TestVersionPickerReloadsAndInstallsTheChosenRef(t *testing.T) {
+	b := newFake()
+	b.preview.Ref, b.preview.DefaultBranch = "v1.1.0", "main"
+	b.preview.Releases = []string{"v2.0.0-rc.1", "v1.1.0", "v1.0.0"}
+	h := start(t, b)
+	h.press("tab", "enter", "v")
+	out := h.screen()
+	for _, want := range [][]string{{"Choose a version"}, {"v2.0.0-rc.1", "pre-release"}, {"v1.1.0", "latest", "shown"}, {"default branch (main)"}} {
+		if !slices.ContainsFunc(strings.Split(out, "\n"), func(line string) bool {
+			return !slices.ContainsFunc(want, func(w string) bool { return !strings.Contains(line, w) })
+		}) {
+			t.Errorf("picker has no line with %q:\n%s", want, out)
+		}
+	}
+	h.press("down", "enter")
+	if got := b.Calls(); got[len(got)-1] != `preview carol/gadget "v1.0.0"` {
+		t.Fatalf("calls = %q, want the preview reloaded at v1.0.0", got)
+	}
+	h.press("enter")
+	if got := b.Calls(); got[len(got)-1] != `install carol/gadget "v1.0.0"` {
+		t.Errorf("calls = %q, want v1.0.0 installed", got)
 	}
 }
 
@@ -671,5 +698,74 @@ func TestPagerAliasesOutsideTyping(t *testing.T) {
 	}
 	if navAlias("ctrl+n", true) != "down" || navAlias("j", true) != "j" {
 		t.Error("ctrl+n moves while typing; j is typed")
+	}
+}
+
+func (h *harness) mouse(msg tea.Msg) {
+	h.t.Helper()
+	_, cmd := h.m.Update(msg)
+	h.run(cmd)
+}
+
+// at finds text on the screen and returns its column and row.
+func (h *harness) at(text string) (x, y int) {
+	h.t.Helper()
+	for y, line := range strings.Split(h.screen(), "\n") {
+		if before, _, found := strings.Cut(line, text); found {
+			return utf8.RuneCountInString(before), y
+		}
+	}
+	h.t.Fatalf("%q is not on the screen:\n%s", text, h.screen())
+	return 0, 0
+}
+
+func TestMouse(t *testing.T) {
+	b := newFake()
+	h := start(t, b)
+	left := func(x, y int) tea.Msg { return tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft} }
+
+	x, y := h.at("beta")
+	h.mouse(left(x, y))
+	if h.m.cursor[tabInstalled] != 1 || h.m.screen != screenList {
+		t.Fatalf("a click on beta should select it: cursor %d, screen %v", h.m.cursor[tabInstalled], h.m.screen)
+	}
+	h.mouse(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	if h.m.cursor[tabInstalled] != 0 {
+		t.Errorf("wheel up: cursor %d, want 0", h.m.cursor[tabInstalled])
+	}
+	x, y = h.at("alpha")
+	h.mouse(left(x, y))
+	if h.m.screen != screenDetail || h.m.detail.plugin == nil || h.m.detail.plugin.PluginID != "alpha" {
+		t.Fatalf("a click on the selected item should open it:\n%s", h.screen())
+	}
+	x, y = h.at("README")
+	h.mouse(left(x, y))
+	if h.m.detail.view != viewReadme {
+		t.Errorf("a click on the README tab should switch to it:\n%s", h.screen())
+	}
+
+	h.press("esc")
+	x, y = h.at("Marketplace")
+	h.mouse(left(x, y))
+	if h.m.tab != tabBrowse {
+		t.Errorf("a click on the Marketplace tab should switch to it:\n%s", h.screen())
+	}
+}
+
+func TestMouseChoosesAVersion(t *testing.T) {
+	b := newFake()
+	b.preview.Ref, b.preview.DefaultBranch = "v1.1.0", "main"
+	b.preview.Releases = []string{"v1.1.0", "v1.0.0"}
+	h := start(t, b)
+	h.press("tab", "enter", "v")
+	x, y := h.at("v1.0.0")
+	click := tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft}
+	h.mouse(click)
+	if h.m.detail.versions == nil || h.m.detail.versions.cursor != 1 {
+		t.Fatalf("a click should select v1.0.0:\n%s", h.screen())
+	}
+	h.mouse(click)
+	if got := b.Calls(); got[len(got)-1] != `preview carol/gadget "v1.0.0"` {
+		t.Errorf("a second click should choose it: calls %q", got)
 	}
 }

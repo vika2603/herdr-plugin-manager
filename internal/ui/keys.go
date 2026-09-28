@@ -52,6 +52,9 @@ var (
 	keyHome     = bind("w", "homepage")
 	keyInfo     = bind("tab", "info")
 	keyReadme   = bind("tab", "readme")
+	keyVersion  = bind("v", "version")
+	keyChoose   = bind("enter", "choose")
+	keyCancel   = bind("esc", "cancel")
 )
 
 // keyMap is the help for one screen: a short line, and the columns ? opens.
@@ -80,6 +83,9 @@ func (m *model) keyMap() keyMap {
 		return keyMap{short: []key.Binding{keyContinue, keyScroll}}
 	case screenDetail:
 		d := m.detail
+		if d.versions != nil {
+			return keyMap{short: []key.Binding{keyChoose, keyMove, keyCancel}}
+		}
 		other := keyInfo
 		switch {
 		case len(d.views()) == 1:
@@ -96,7 +102,7 @@ func (m *model) keyMap() keyMap {
 		case d.update != nil:
 			return keyMap{short: []key.Binding{keyApply, other, keyHome, keyScroll, keyBack}}
 		default:
-			return keyMap{short: []key.Binding{keyInstall, other, keyHome, keyScroll, keyBack}}
+			return keyMap{short: []key.Binding{keyInstall, other, keyVersion, keyHome, keyScroll, keyBack}}
 		}
 	}
 	if m.filters[m.tab].Focused() {

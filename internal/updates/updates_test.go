@@ -33,6 +33,15 @@ func TestParseLsRemote(t *testing.T) {
 	if _, ok := refs.Tags["v0.2.0^{}"]; ok {
 		t.Error("peeled entry kept as its own tag")
 	}
+	if refs.HeadBranch != "main" {
+		t.Errorf("head branch = %q", refs.HeadBranch)
+	}
+	if got := strings.Join(refs.Releases(), ","); got != "v0.3.0-rc.1,v0.2.0,v0.1.0" {
+		t.Errorf("releases = %s, want newest first without non-release tags", got)
+	}
+	if got := refs.LatestRelease(); got != "v0.2.0" {
+		t.Errorf("latest release = %q, want the newest that is not a pre-release", got)
+	}
 }
 
 type fakeLister struct {

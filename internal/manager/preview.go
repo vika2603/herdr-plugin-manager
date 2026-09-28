@@ -24,9 +24,14 @@ type Preview struct {
 	// Commit is what Ref resolved to when the manifest was read. Install and
 	// Update refuse to go ahead when Ref has since moved, so what is
 	// installed is what was reviewed.
-	Commit   string
-	Manifest *manifest.Manifest
-	Warnings []string
+	Commit string
+	// Releases are the release tags that could be installed instead, the
+	// newest first, and DefaultBranch the default branch's name. Both are
+	// empty when the remote was not listed, as for a commit.
+	Releases      []string
+	DefaultBranch string
+	Manifest      *manifest.Manifest
+	Warnings      []string
 	// Problems are reasons the plugin cannot be installed or run here.
 	Problems []string
 	// Existing is the installed plugin with the same id, if any.
@@ -59,6 +64,9 @@ func (p *Preview) Sections() []Section {
 	ref := p.Ref
 	if ref == "" {
 		ref = "default branch"
+		if p.DefaultBranch != "" {
+			ref += " (" + p.DefaultBranch + ")"
+		}
 	}
 	summary := []string{
 		fmt.Sprintf("%s %s (%s)", m.Name, m.Version, m.ID),
@@ -69,6 +77,9 @@ func (p *Preview) Sections() []Section {
 		summary = append(summary, m.Description)
 	}
 	summary = append(summary, "platforms: "+platformList(m.Platforms), "min herdr: "+m.MinHerdrVersion)
+	if len(p.Releases) > 0 {
+		summary = append(summary, "releases: "+firstFew(p.Releases, 5))
+	}
 	if p.Existing != nil {
 		summary = append(summary, fmt.Sprintf("replaces installed %s from %s", p.Existing.Version, SourceLabel(*p.Existing)))
 	}
@@ -150,6 +161,14 @@ func (p *Preview) entrypoints() (sections []Section, hidden int) {
 		}
 	}
 	return sections, hidden
+}
+
+// firstFew lists up to n items and counts the rest.
+func firstFew(items []string, n int) string {
+	if len(items) <= n {
+		return strings.Join(items, ", ")
+	}
+	return fmt.Sprintf("%s and %d more", strings.Join(items[:n], ", "), len(items)-n)
 }
 
 func shortCommit(commit string) string {

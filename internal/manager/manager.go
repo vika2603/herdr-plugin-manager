@@ -340,14 +340,20 @@ func (m *Manager) Index(ctx context.Context, refresh bool) (*market.Index, marke
 }
 
 // Preview reads the manifest src would install at ref and checks it against
-// this machine. installed is the current plugin list, used to report what an
-// install would replace.
+// this machine. An empty ref installs the latest release of a plugin at the
+// root of its repository, and the default branch otherwise: the tags of a
+// repository with a plugin in a subdirectory usually version something else.
+// installed is the current plugin list, used to report what an install would
+// replace.
 func (m *Manager) Preview(ctx context.Context, src source.GitHub, ref, hint, herdrVersion string, installed []herdr.InstalledPluginInfo) (*Preview, error) {
-	commit, mf, warnings, err := m.manifestAt(ctx, src, ref, hint)
+	t, mf, warnings, err := m.manifestAt(ctx, src, ref, hint)
 	if err != nil {
 		return nil, err
 	}
-	p := &Preview{Source: src, Ref: ref, Commit: commit, Manifest: mf, Warnings: warnings, Platform: m.Platform}
+	p := &Preview{
+		Source: src, Ref: t.ref, Commit: t.commit, Releases: t.releases, DefaultBranch: t.branch,
+		Manifest: mf, Warnings: warnings, Platform: m.Platform,
+	}
 	platforms := make([]string, len(mf.Platforms))
 	for i, pl := range mf.Platforms {
 		platforms[i] = string(pl)
@@ -365,11 +371,41 @@ func (m *Manager) Preview(ctx context.Context, src source.GitHub, ref, hint, her
 	return p, nil
 }
 
-// manifestAt resolves ref and reads the manifest at the commit it points at.
-// hint is the commit ref is expected at, such as the marketplace index's
-// record of the default branch: its manifest is downloaded while ref
-// resolves, and used when the guess is right.
-func (m *Manager) manifestAt(ctx context.Context, src source.GitHub, ref, hint string) (commit string, mf *manifest.Manifest, warnings []string, err error) {
+// target is what an install checks out.
+type target struct {
+	ref, commit string
+	// releases and branch are the release tags and the default branch the
+	// remote offers, when it was listed.
+	releases []string
+	branch   string
+}
+
+// pick resolves ref, choosing one for an empty ref as Preview describes.
+func (m *Manager) pick(ctx context.Context, src source.GitHub, ref string) (target, error) {
+	if updates.IsCommit(ref) {
+		return target{ref: ref, commit: ref}, nil
+	}
+	refs, err := m.Git.List(ctx, src.CloneURL())
+	if err != nil {
+		return target{}, err
+	}
+	t := target{ref: ref, releases: refs.Releases(), branch: refs.HeadBranch}
+	if ref == "" && src.Subdir == "" {
+		t.ref = refs.LatestRelease()
+	}
+	commit, ok := refs.Resolve(t.ref)
+	if !ok {
+		return target{}, fmt.Errorf("%s has no ref %q", src.Repository(), ref)
+	}
+	t.commit = commit
+	return t, nil
+}
+
+// manifestAt picks what to install and reads the manifest at its commit.
+// hint is the commit that is expected, such as the marketplace index's
+// record of the default branch: its manifest is downloaded while the remote
+// is listed, and used when the guess is right.
+func (m *Manager) manifestAt(ctx context.Context, src source.GitHub, ref, hint string) (t target, mf *manifest.Manifest, warnings []string, err error) {
 	type fetched struct {
 		mf       *manifest.Manifest
 		warnings []string
@@ -385,13 +421,13 @@ func (m *Manager) manifestAt(ctx context.Context, src source.GitHub, ref, hint s
 			guess <- fetched{mf, warnings, err}
 		}()
 	}
-	if commit, err = m.resolve(ctx, src, ref); err != nil {
-		return "", nil, nil, err
+	if t, err = m.pick(ctx, src, ref); err != nil {
+		return target{}, nil, nil, err
 	}
-	if guess != nil && commit == hint {
+	if guess != nil && t.commit == hint {
 		f := <-guess
-		return commit, f.mf, f.warnings, f.err
+		return t, f.mf, f.warnings, f.err
 	}
-	mf, warnings, err = m.Market.Manifest(ctx, src, commit)
-	return commit, mf, warnings, err
+	mf, warnings, err = m.Market.Manifest(ctx, src, t.commit)
+	return t, mf, warnings, err
 }

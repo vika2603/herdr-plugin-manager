@@ -47,6 +47,8 @@ func (m *model) View() tea.View {
 	}
 	v := tea.NewView(content)
 	v.AltScreen = m.opts.AltScreen
+	// Holding shift, or option in some terminals, still selects text.
+	v.MouseMode = tea.MouseModeCellMotion
 	return v
 }
 
@@ -187,13 +189,11 @@ func (m *model) tabRow(names []string, counts []int, active int) (labels, underl
 	l.WriteString(" ")
 	u.WriteString(t.rule.Render("─"))
 	for i, name := range names {
-		cell := " " + name + " "
 		count := ""
 		if counts != nil {
 			count = strconv.Itoa(counts[i])
-			cell += count + " "
 		}
-		width := ansi.StringWidth(cell)
+		width := ansi.StringWidth(tabCell(names, counts, i))
 		nameStyle, countStyle, line, glyph := t.tabInactive, t.tabCount, t.rule, "─"
 		if i == active {
 			nameStyle, countStyle, line, glyph = t.tabActive, t.tabActive.UnsetBold(), t.tabLine, "━"
@@ -542,6 +542,8 @@ func (m *model) detailHeader(d *detail) []string {
 func (m *model) detailLines(d *detail) []string {
 	var raw []string
 	switch {
+	case d.versions != nil:
+		return m.versionLines(d)
 	case d.plugin != nil:
 		raw = m.installedDetail(d)
 	case d.loading && d.entry != nil:
@@ -581,7 +583,7 @@ func (m *model) entrySections(e *market.Entry) []manager.Section {
 	}
 	summary := []string{
 		fmt.Sprintf("%s %s (%s)", mf.Name, mf.Version, mf.ID),
-		"source: " + e.Source.String() + " @ default branch",
+		"source: " + e.Source.String(),
 		"link: " + e.Source.WebURL(),
 	}
 	if mf.Description != "" {

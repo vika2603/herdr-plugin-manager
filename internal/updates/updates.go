@@ -16,6 +16,7 @@ package updates
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -23,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -98,9 +100,45 @@ func short(commit string) string {
 // head, branches and tags. Annotated tags are resolved to the commit they
 // point at.
 type Refs struct {
-	Head     string
-	Branches map[string]string
-	Tags     map[string]string
+	Head string
+	// HeadBranch is the name of the default branch, when the remote says.
+	HeadBranch string
+	Branches   map[string]string
+	Tags       map[string]string
+}
+
+// Releases lists the release tags, the newest version first. Pre-releases
+// are included.
+func (r Refs) Releases() []string {
+	type release struct{ tag, version string }
+	var out []release
+	for name := range r.Tags {
+		if v, ok := releaseVersion(name); ok {
+			out = append(out, release{name, v})
+		}
+	}
+	slices.SortFunc(out, func(a, b release) int {
+		return cmp.Or(semver.Compare(b.version, a.version), strings.Compare(a.tag, b.tag))
+	})
+	tags := make([]string, len(out))
+	for i, r := range out {
+		tags[i] = r.tag
+	}
+	return tags
+}
+
+// IsPrerelease reports whether tag is a release tag for a pre-release, such
+// as v1.0.0-rc.1.
+func IsPrerelease(tag string) bool {
+	v, ok := releaseVersion(tag)
+	return ok && semver.Prerelease(v) != ""
+}
+
+// LatestRelease is the release tag with the highest version, leaving out
+// pre-releases, or "" when there is none.
+func (r Refs) LatestRelease() string {
+	tag, _ := latestRelease(r.Tags, false)
+	return tag
 }
 
 // Resolve returns the commit ref points at: the default branch for an empty
@@ -323,7 +361,13 @@ func ParseLsRemote(out string) Refs {
 	scanner := bufio.NewScanner(strings.NewReader(out))
 	for scanner.Scan() {
 		sha, name, ok := strings.Cut(scanner.Text(), "\t")
-		if !ok || strings.HasPrefix(sha, "ref: ") {
+		if !ok {
+			continue
+		}
+		if target, isSymref := strings.CutPrefix(sha, "ref: "); isSymref {
+			if name == "HEAD" {
+				refs.HeadBranch = strings.TrimPrefix(target, "refs/heads/")
+			}
 			continue
 		}
 		switch {

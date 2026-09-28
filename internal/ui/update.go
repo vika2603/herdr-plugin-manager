@@ -37,6 +37,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case tea.KeyPressMsg:
 		return m.key(msg)
+	case tea.MouseWheelMsg:
+		m.wheel(tea.Mouse(msg))
+		return m, nil
+	case tea.MouseClickMsg:
+		return m, m.click(tea.Mouse(msg))
 	}
 	if cmd, ok := m.result(msg); ok {
 		return m, cmd
@@ -380,6 +385,9 @@ func (m *model) keyBrowse(k string) (tea.Model, tea.Cmd) {
 
 func (m *model) keyDetail(k string) (tea.Model, tea.Cmd) {
 	d := m.detail
+	if d.versions != nil {
+		return m, m.keyVersions(d, k)
+	}
 	offset := &d.offsets[d.view]
 	switch k {
 	case "esc", "q", "backspace", "left", "h":
@@ -422,6 +430,10 @@ func (m *model) keyDetail(k string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if k == "v" && d.install != nil && !d.loading {
+		m.openVersions(d)
+		return m, nil
+	}
 	if k != "enter" && k != "i" {
 		return m, nil
 	}
@@ -439,7 +451,7 @@ func (m *model) keyDetail(k string) (tea.Model, tea.Cmd) {
 		return m, m.withSpinner(m.update(*d.update))
 	}
 	target := *d.install
-	target.commit = d.preview.Commit
+	target.ref, target.commit = d.preview.Ref, d.preview.Commit
 	return m, m.withSpinner(m.install(target, d.preview.Manifest.ID))
 }
 

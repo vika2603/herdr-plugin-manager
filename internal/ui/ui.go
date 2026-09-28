@@ -162,6 +162,8 @@ type detail struct {
 	update  *manager.Checked
 	// entry is the marketplace listing an install was opened from.
 	entry *market.Entry
+	// versions is open while the user picks another version to preview.
+	versions *versionPicker
 
 	view   view
 	readme readme

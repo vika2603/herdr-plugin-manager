@@ -356,6 +356,44 @@ func TestCheckIgnoresCommitsOutsideTheSubdirectory(t *testing.T) {
 	}
 }
 
+func TestPreviewPicksTheLatestReleaseAtTheRoot(t *testing.T) {
+	var mu sync.Mutex
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		_, _ = w.Write([]byte("id = \"o.r\"\nname = \"R\"\nversion = \"1.0.0\"\nmin_herdr_version = \"0.9.0\"\n"))
+	}))
+	defer server.Close()
+	mc := market.NewClient("", "test")
+	mc.HTTP = &http.Client{Transport: redirect{server.URL}}
+	head, v1, v2 := strings.Repeat("h", 40), strings.Repeat("1", 40), strings.Repeat("2", 40)
+	m := &Manager{Market: mc, Git: fakeLister{updates.Refs{Head: head, HeadBranch: "main",
+		Branches: map[string]string{"main": head}, Tags: map[string]string{"v1.0.0": v1, "v2.0.0-rc.1": v2}}}}
+	ctx := context.Background()
+
+	p, err := m.Preview(ctx, source.GitHub{Owner: "o", Repo: "r"}, "", "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Ref != "v1.0.0" || p.Commit != v1 || p.DefaultBranch != "main" || !slices.Equal(p.Releases, []string{"v2.0.0-rc.1", "v1.0.0"}) {
+		t.Errorf("root plugin: ref %q commit %.7s branch %q releases %q; want v1.0.0, skipping the pre-release", p.Ref, p.Commit, p.DefaultBranch, p.Releases)
+	}
+	if last := paths[len(paths)-1]; !strings.Contains(last, "/"+v1+"/") {
+		t.Errorf("manifest read from %q, want the release commit", last)
+	}
+
+	p, err = m.Preview(ctx, source.GitHub{Owner: "o", Repo: "r", Subdir: "plugin"}, "", "", "", nil)
+	if err != nil || p.Ref != "" || p.Commit != head {
+		t.Errorf("subdirectory plugin: ref %q commit %.7s %v; want the default branch", p.Ref, p.Commit, err)
+	}
+	p, err = m.Preview(ctx, source.GitHub{Owner: "o", Repo: "r"}, "main", "", "", nil)
+	if err != nil || p.Ref != "main" || p.Commit != head {
+		t.Errorf("explicit branch: ref %q commit %.7s %v", p.Ref, p.Commit, err)
+	}
+}
+
 func TestInstallRefusesAMovedSource(t *testing.T) {
 	cli, calls := fakeHerdr(t, `exit 0`)
 	m := &Manager{CLI: cli, Git: headAt(strings.Repeat("b", 40))}
