@@ -1,0 +1,88 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - copyloopvar
+    - dupword
+    - durationcheck
+    - errchkjson
+    - errname
+    - errorlint
+    - exhaustive
+    - forcetypeassert
+    - gocognit
+    - gocritic
+    - gosec
+    - intrange
+    - misspell
+    - modernize
+    - nakedret
+    - nilerr
+    - nilnil
+    - noctx
+    - nolintlint
+    - perfsprint
+    - predeclared
+    - revive
+    - thelper
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - wastedassign
+    - whitespace
+  settings:
+    errcheck:
+      # Terminal output: a failed write to stdout has nowhere better to go.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+    exhaustive:
+      # A default case is an explicit decision about the remaining values.
+      default-signifies-exhaustive: true
+    gocognit:
+      min-complexity: 30
+    gocritic:
+      enabled-tags: [diagnostic, style, performance]
+      disabled-checks:
+        # Bubble Tea models and herdr's generated types are passed by value
+        # by design.
+        - hugeParam
+        - rangeValCopy
+        # Flags `return m, m.cmd()` where cmd mutates m; the models are
+        # pointers, so the order does not matter.
+        - evalOrder
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    revive:
+      rules:
+        - name: exported
+        - name: unused-parameter
+        - name: unused-receiver
+        - name: early-return
+        - name: indent-error-flow
+        - name: superfluous-else
+        - name: unreachable-code
+        - name: redefines-builtin-id
+        - name: context-as-argument
+        - name: error-strings
+        - name: error-return
+        - name: errorf
+        - name: var-naming
+  exclusions:
+    rules:
+      # Tests run fixed commands on fixtures they create themselves.
+      - path: _test\.go
+        linters: [gosec, forcetypeassert, gocognit]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/vika2603/herdr-plugin-manager

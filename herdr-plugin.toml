@@ -1,0 +1,32 @@
+# Browse, install and update herdr plugins from a popup. The same binary is
+# also a standalone command line; see README.md.
+
+id = "vika2603.plugin-manager"
+name = "Plugin Manager"
+version = "0.1.0"
+# The socket client is generated against herdr 0.9.1 (protocol 22).
+min_herdr_version = "0.9.1"
+description = "Browse, install and update herdr plugins"
+# Windows is left out until the manager has been tested there.
+platforms = ["linux", "macos"]
+
+# Downloads the release binary for this version, or builds from source with
+# Go when there is none.
+[[build]]
+command = ["sh", "scripts/install.sh"]
+
+[[actions]]
+id = "open"
+title = "Manage plugins"
+description = "Open the plugin manager popup"
+contexts = ["global", "workspace", "tab", "pane"]
+command = ["./bin/hpm"]
+
+[[panes]]
+id = "manager"
+title = "Plugins"
+description = "Browse, install and update herdr plugins"
+placement = "popup"
+width = "80%"
+height = "80%"
+command = ["./bin/hpm"]
