@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -18,10 +19,12 @@ import (
 	"github.com/vika2603/herdr-client/herdr"
 
 	"github.com/vika2603/herdr-plugin-manager/internal/app"
+	"github.com/vika2603/herdr-plugin-manager/internal/config"
 	"github.com/vika2603/herdr-plugin-manager/internal/manager"
 	"github.com/vika2603/herdr-plugin-manager/internal/market"
 	"github.com/vika2603/herdr-plugin-manager/internal/safe"
 	"github.com/vika2603/herdr-plugin-manager/internal/source"
+	"github.com/vika2603/herdr-plugin-manager/internal/ui"
 	"github.com/vika2603/herdr-plugin-manager/internal/updates"
 )
 
@@ -75,7 +78,7 @@ func (c *cli) root(tui TUI) *cobra.Command {
 	root.SetErr(c.errOut)
 	root.AddCommand(
 		c.listCmd(), c.searchCmd(), c.infoCmd(), c.installCmd(), c.uninstallCmd(),
-		c.enableCmd(true), c.enableCmd(false), c.outdatedCmd(), c.updateCmd(), c.logsCmd(),
+		c.enableCmd(true), c.enableCmd(false), c.outdatedCmd(), c.updateCmd(), c.logsCmd(), c.keysCmd(),
 	)
 	return root
 }
@@ -550,6 +553,40 @@ func (c *cli) logsCmd() *cobra.Command {
 	}
 	cmd.Flags().IntVar(&limit, "limit", 20, "maximum number of log entries")
 	return cmd
+}
+
+func (c *cli) keysCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "keys",
+		Short: "List the keys of the interactive manager, and where to change them",
+		Long: "List what each key does in the popup and in the terminal manager. To change\n" +
+			"them, give an action its keys in the [keys] table of the config file, such as\n" +
+			"  install = [\"I\"]\n" +
+			"An empty list unbinds the action.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			dir := app.ConfigDir(cmd.Context(), c.m)
+			cfg, cfgErr := config.Load(dir)
+			keys, keysErr := ui.Keys(cfg.Keys)
+			if dir == "" {
+				fmt.Fprintln(c.out, "Config file: unknown; herdr could not report the plugin config directory")
+			} else {
+				fmt.Fprintf(c.out, "Config file: %s\n", filepath.Join(dir, config.File))
+			}
+			tw := c.table()
+			fmt.Fprintln(tw, "\nACTION\tKEYS")
+			for _, k := range keys {
+				fmt.Fprintf(tw, "%s\t%s\n", k.Action, strings.Join(k.Keys, "  "))
+			}
+			if err := tw.Flush(); err != nil {
+				return err
+			}
+			if err := errors.Join(cfgErr, keysErr); err != nil {
+				return fmt.Errorf("%w; the keys above are the defaults", err)
+			}
+			return nil
+		},
+	}
 }
 
 // resolve turns a plugin id from the marketplace or an owner/repo[/subdir]

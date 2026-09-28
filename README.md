@@ -49,9 +49,17 @@ For the command line alone, download the archive for your platform from the
 
 Open the popup, or run `hpm` with no arguments for the same interface in the
 terminal. Press `?` for every key; the mouse scrolls, and a click selects,
-then opens. An install takes the latest release of a plugin at the root of
-its repository, else the default branch; press `v` in the preview to choose
-another version.
+then opens. `i` installs from the preview, which shows what the plugin runs.
+An install takes the latest release of a plugin at the root of its
+repository, else the default branch; `v` in the preview chooses another
+version and shows its release notes.
+
+`hpm keys` lists the keys and the config file that changes them:
+
+```toml
+[keys]
+install = ["I"]
+```
 
 | Command | Does |
 | --- | --- |

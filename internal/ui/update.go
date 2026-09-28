@@ -17,7 +17,21 @@ import (
 )
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	gen := m.statusGen
+	model, cmd := m.handle(msg)
+	if m.statusGen != gen && m.status != "" {
+		cmd = tea.Batch(cmd, m.expireStatus())
+	}
+	return model, cmd
+}
+
+func (m *model) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case statusExpiredMsg:
+		if msg.gen == m.statusGen {
+			m.status, m.statusErr = "", false
+		}
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.help.SetWidth(max(msg.Width-2, 10))
@@ -85,6 +99,8 @@ func (m *model) result(msg tea.Msg) (tea.Cmd, bool) {
 		msg.d.preview, msg.d.err = msg.preview, msg.err
 	case readmeMsg:
 		m.onReadme(msg)
+	case releasesMsg:
+		m.onReleases(msg)
 	case openedMsg:
 		if msg.err != nil {
 			m.setStatus(msg.err.Error(), true)
@@ -184,39 +200,37 @@ func (m *model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if c := m.confirm; c != nil {
 		m.confirm = nil
-		if k == "y" || k == "Y" {
+		if m.keys.is(k, actConfirm) {
 			return m, m.withSpinner(c.run())
 		}
 		m.setStatus("Cancelled", false)
 		return m, nil
 	}
-	f := &m.filters[m.tab]
-	typing := m.screen == screenList && f.Focused()
-	k = navAlias(k, typing)
 	switch m.screen {
 	case screenOutput:
-		return m.keyOutput(k)
+		return m.keyOutput(m.keys.action(k, onOutput))
 	case screenDetail:
 		return m.keyDetail(k)
 	case screenList:
 	}
 
-	if typing {
-		switch k {
-		case "enter":
-			// As in fzf: type, move to a result, and enter opens it.
+	if f := &m.filters[m.tab]; f.Focused() {
+		switch a := m.keys.typing(k); a {
+		case actOpen:
+			// As in fzf: type, move to a result, and open it.
 			f.Blur()
-			return m.keyList("enter")
-		case "tab":
+			return m.listAction(actOpen)
+		case actSwitch:
 			f.Blur()
 			return m, nil
-		case "esc":
+		case actClose:
 			f.Blur()
 			m.setFilter("")
 			return m, nil
-		case "up", "down", "pgup", "pgdown":
-			m.move(k)
+		case actUp, actDown, actPageUp, actPageDown:
+			m.move(a)
 			return m, nil
+		default:
 		}
 		before := f.Value()
 		var cmd tea.Cmd
@@ -226,30 +240,7 @@ func (m *model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 	}
-	return m.keyList(k)
-}
-
-// navAlias maps the common editor and pager keys onto the arrow and page
-// keys, alongside vim's j and k: ctrl+n and ctrl+p move by a line, ctrl+f and
-// ctrl+d page down, ctrl+b and ctrl+u page up. While typing in a filter only
-// ctrl+n and ctrl+p apply; the text field keeps the others, ctrl+u among them.
-func navAlias(k string, typing bool) string {
-	switch k {
-	case "ctrl+n":
-		return "down"
-	case "ctrl+p":
-		return "up"
-	}
-	if typing {
-		return k
-	}
-	switch k {
-	case "ctrl+f", "ctrl+d":
-		return "pgdown"
-	case "ctrl+b", "ctrl+u":
-		return "pgup"
-	}
-	return k
+	return m.listAction(m.keys.action(k, onList))
 }
 
 func (m *model) setFilter(value string) {
@@ -257,46 +248,47 @@ func (m *model) setFilter(value string) {
 	m.cursor[m.tab], m.offset[m.tab] = 0, 0
 }
 
-func (m *model) keyList(k string) (tea.Model, tea.Cmd) {
-	switch k {
-	case "q":
+func (m *model) listAction(a action) (tea.Model, tea.Cmd) {
+	switch a {
+	case actQuit:
 		return m.quit()
-	case "esc":
+	case actClose:
 		if m.filters[m.tab].Value() != "" {
 			m.setFilter("")
 			return m, nil
 		}
 		return m.quit()
-	case "tab", "shift+tab":
+	case actSwitch:
 		m.tab = 1 - m.tab
 		return m, nil
-	case "1":
+	case actTabInstalled:
 		m.tab = tabInstalled
 		return m, nil
-	case "2":
+	case actTabMarketplace:
 		m.tab = tabBrowse
 		return m, nil
-	case "/":
+	case actSearch:
 		return m, m.filters[m.tab].Focus()
-	case "?":
+	case actHelp:
 		m.showHelp = !m.showHelp
 		m.clamp(m.tab)
 		return m, nil
-	case "up", "k", "down", "j", "pgup", "pgdown", "home", "g", "end", "G":
-		m.move(k)
+	case actUp, actDown, actPageUp, actPageDown, actTop, actBottom:
+		m.move(a)
 		return m, nil
-	case "w":
+	case actHomepage:
 		return m, m.openHomepage()
-	case "o":
+	case actOutput:
 		if m.output.title != "" {
 			m.screen, m.outputOffset = screenOutput, 0
 		}
 		return m, nil
+	default:
 	}
 	if m.tab == tabInstalled {
-		return m.keyInstalled(k)
+		return m.installedAction(a)
 	}
-	return m.keyBrowse(k)
+	return m.browseAction(a)
 }
 
 func (m *model) quit() (tea.Model, tea.Cmd) {
@@ -307,17 +299,17 @@ func (m *model) quit() (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
-func (m *model) keyInstalled(k string) (tea.Model, tea.Cmd) {
-	switch k {
-	case "r":
+func (m *model) installedAction(a action) (tea.Model, tea.Cmd) {
+	switch a {
+	case actReload:
 		m.setStatus("", false)
 		return m, tea.Batch(m.loadInstalled(), m.loadVersion())
-	case "c":
+	case actCheck:
 		if len(m.installed) == 0 || m.checking {
 			return m, nil
 		}
 		return m, m.withSpinner(m.checkUpdates())
-	case "U":
+	case actUpdateAll:
 		list := m.available()
 		if len(list) == 0 {
 			m.setStatus("No updates available", false)
@@ -331,20 +323,22 @@ func (m *model) keyInstalled(k string) (tea.Model, tea.Cmd) {
 			run:    func() tea.Cmd { return m.updateAll(list) },
 		}
 		return m, nil
+	default:
 	}
 	p, ok := m.selectedInstalled()
 	if !ok {
 		return m, nil
 	}
-	switch k {
-	case "enter":
+	switch a {
+	case actOpen:
 		return m, m.openInstalled(p)
-	case "space", "e":
+	case actToggle:
 		return m, m.toggle(p)
-	case "u":
+	case actUpdate:
 		return m, m.openUpdate(p)
-	case "x", "delete":
+	case actUninstall:
 		m.askUninstall(p)
+	default:
 	}
 	return m, nil
 }
@@ -357,21 +351,22 @@ func (m *model) toggle(p herdr.InstalledPluginInfo) tea.Cmd {
 	return m.setEnabled(p.PluginID, !p.Enabled)
 }
 
-func (m *model) keyBrowse(k string) (tea.Model, tea.Cmd) {
-	switch k {
-	case "r":
+func (m *model) browseAction(a action) (tea.Model, tea.Cmd) {
+	switch a {
+	case actReload:
 		if m.indexLoading {
 			return m, nil
 		}
 		m.indexLoading = true
 		m.setStatus("", false)
 		return m, m.withSpinner(m.loadIndex(true))
-	case "s":
+	case actSort:
 		m.order = m.order.Next()
 		m.sortEntries()
 		m.cursor[tabBrowse], m.offset[tabBrowse] = 0, 0
 		return m, nil
-	case "enter", "i":
+	case actOpen, actInstall:
+		// Installing starts from the preview, like opening does.
 		entries := m.visibleEntries()
 		if c := m.cursor[tabBrowse]; c < len(entries) {
 			return m, m.openInstall(entries[c])
@@ -379,6 +374,7 @@ func (m *model) keyBrowse(k string) (tea.Model, tea.Cmd) {
 		if src, ok := m.typedSource(); ok {
 			return m, m.openPreview(src.String(), &installTarget{src: src}, nil)
 		}
+	default:
 	}
 	return m, nil
 }
@@ -386,58 +382,67 @@ func (m *model) keyBrowse(k string) (tea.Model, tea.Cmd) {
 func (m *model) keyDetail(k string) (tea.Model, tea.Cmd) {
 	d := m.detail
 	if d.versions != nil {
-		return m, m.keyVersions(d, k)
+		return m, m.keyVersions(d, m.keys.action(k, onPicker))
 	}
+	a := m.keys.action(k, onDetail)
 	offset := &d.offsets[d.view]
-	switch k {
-	case "esc", "q", "backspace", "left", "h":
+	switch a {
+	case actBack, actQuit:
 		m.screen, m.detail = screenList, nil
 		return m, nil
-	case "tab", "shift+tab":
+	case actSwitch:
 		return m, m.switchView(d)
-	case "w":
+	case actHomepage:
 		return m, m.openHomepage()
-	case "up", "k":
+	case actUp:
 		*offset = max(*offset-1, 0)
 		return m, nil
-	case "down", "j":
+	case actDown:
 		*offset++
 		return m, nil
-	case "pgup":
+	case actPageUp:
 		*offset = max(*offset-m.bodyHeight(), 0)
 		return m, nil
-	case "pgdown", "space":
+	case actPageDown:
 		*offset += m.bodyHeight()
 		return m, nil
-	case "home", "g":
+	case actTop:
 		*offset = 0
 		return m, nil
+	default:
 	}
 
 	if d.plugin != nil {
 		p := *d.plugin
-		switch k {
-		case "e":
+		switch a {
+		case actToggle:
 			return m, m.toggle(p)
-		case "u":
+		case actUpdate:
 			return m, m.openUpdate(p)
-		case "x", "delete":
+		case actUninstall:
 			m.askUninstall(p)
 			return m, nil
-		case "r":
+		case actReload:
 			return m, m.loadLogs(p.PluginID)
+		default:
 		}
 		return m, nil
 	}
 
-	if k == "v" && d.install != nil && !d.loading {
-		m.openVersions(d)
+	if a == actVersion && d.install != nil && !d.loading {
+		return m, m.openVersions(d)
+	}
+	// A preview's action has its own key, so the key that opened the
+	// preview cannot also install it when pressed twice.
+	want, verb := actInstall, "install"
+	if d.update != nil {
+		want, verb = actUpdate, "update"
+	}
+	if a == actOpen && d.preview != nil {
+		m.setStatus("Press "+m.keys.name(want)+" to "+verb, false)
 		return m, nil
 	}
-	if k != "enter" && k != "i" {
-		return m, nil
-	}
-	if d.loading || d.preview == nil {
+	if a != want || d.loading || d.preview == nil {
 		return m, nil
 	}
 	if len(d.preview.Problems) > 0 {
@@ -455,15 +460,15 @@ func (m *model) keyDetail(k string) (tea.Model, tea.Cmd) {
 	return m, m.withSpinner(m.install(target, d.preview.Manifest.ID))
 }
 
-func (m *model) keyOutput(k string) (tea.Model, tea.Cmd) {
-	switch k {
-	case "up", "k":
+func (m *model) keyOutput(a action) (tea.Model, tea.Cmd) {
+	switch a {
+	case actUp:
 		m.outputOffset = max(m.outputOffset-1, 0)
-	case "down", "j":
+	case actDown:
 		m.outputOffset++
-	case "pgup":
+	case actPageUp:
 		m.outputOffset = max(m.outputOffset-m.bodyHeight(), 0)
-	case "pgdown", "space":
+	case actPageDown:
 		m.outputOffset += m.bodyHeight()
 	default:
 		m.screen = screenList
@@ -559,23 +564,24 @@ func (m *model) selectedInstalled() (herdr.InstalledPluginInfo, bool) {
 }
 
 // move applies a navigation key to the current tab's cursor.
-func (m *model) move(k string) {
+func (m *model) move(a action) {
 	n := m.rowCount()
 	c := m.cursor[m.tab]
 	page := m.pageSize()
-	switch k {
-	case "up", "k":
+	switch a {
+	case actUp:
 		c--
-	case "down", "j":
+	case actDown:
 		c++
-	case "pgup":
+	case actPageUp:
 		c -= page
-	case "pgdown":
+	case actPageDown:
 		c += page
-	case "home", "g":
+	case actTop:
 		c = 0
-	case "end", "G":
+	case actBottom:
 		c = n - 1
+	default:
 	}
 	m.cursor[m.tab] = c
 	m.clamp(m.tab)

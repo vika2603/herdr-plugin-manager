@@ -88,10 +88,28 @@ func (m *model) pageSize() int {
 // tabNames label the tabs and the breadcrumbs of screens opened from them.
 var tabNames = [...]string{tabInstalled: "Installed", tabBrowse: "Marketplace"}
 
-// tabIntros say what each tab holds, for someone opening it the first time.
-var tabIntros = [...]string{
-	tabInstalled: "Plugins installed or linked in herdr. Press tab for the marketplace.",
-	tabBrowse:    "Community plugins indexed by herdr.dev, not reviewed. Preview one to see what it runs.",
+// tabIntro says what a tab holds, for someone opening it the first time.
+func (m *model) tabIntro(t tab) string {
+	if t == tabBrowse {
+		return "Community plugins indexed by herdr.dev, not reviewed. Preview one to see what it runs."
+	}
+	return "Plugins installed or linked in herdr." + m.press(actSwitch, "for the marketplace")
+}
+
+// press is a sentence telling which key does a, or "" when a has no key.
+func (m *model) press(a action, what string) string {
+	if k := m.keys.name(a); k != "" {
+		return " Press " + k + " " + what + "."
+	}
+	return ""
+}
+
+// keyHint is " · <key> <what>" for the status line, or "" when a has no key.
+func (m *model) keyHint(a action, what string) string {
+	if k := m.keys.name(a); k != "" {
+		return " · " + k + " " + what
+	}
+	return ""
 }
 
 func (m *model) helpLines() []string {
@@ -175,7 +193,7 @@ func (m *model) frame(top []string, filter *string, body []string) string {
 func (m *model) dialog(height int) string {
 	t := m.theme
 	box := t.dialog.Render(t.itemTitle.Bold(true).Render(m.confirm.prompt) + "\n\n" +
-		t.faint.Render("y confirm · any other key cancels"))
+		t.faint.Render(m.keys.name(actConfirm)+" confirm · any other key cancels"))
 	return lipgloss.Place(m.w(), height, lipgloss.Center, lipgloss.Center, box)
 }
 
@@ -218,7 +236,7 @@ func (m *model) tabBar() []string {
 	return []string{
 		spread(labels, m.versionLabel(), m.w()),
 		underline,
-		"  " + m.theme.intro.Render(tabIntros[m.tab]),
+		"  " + m.theme.intro.Render(m.tabIntro(m.tab)),
 	}
 }
 
@@ -277,9 +295,9 @@ func (m *model) statusLine() string {
 		case 0:
 			return " " + t.faint.Render("All GitHub plugins are up to date")
 		case 1:
-			return " " + t.warn.Render("1 update available") + t.faint.Render(" · u to review")
+			return " " + t.warn.Render("1 update available") + t.faint.Render(m.keyHint(actUpdate, "to review"))
 		default:
-			return " " + t.warn.Render(fmt.Sprintf("%d updates available", n)) + t.faint.Render(" · U updates all")
+			return " " + t.warn.Render(fmt.Sprintf("%d updates available", n)) + t.faint.Render(m.keyHint(actUpdateAll, "updates all"))
 		}
 	}
 	switch {
@@ -308,7 +326,7 @@ func (m *model) viewList() string {
 	f.SetWidth(max(m.w()-ansi.StringWidth(right)-6, 10))
 	left := " " + f.View()
 	if !f.Focused() && f.Value() == "" {
-		left = " " + t.faint.Render("/ "+f.Placeholder)
+		left = " " + t.faint.Render(f.Prompt+f.Placeholder)
 	}
 	filter := spread(left, right, m.w())
 
@@ -359,7 +377,7 @@ func (m *model) installedItems() []string {
 		case m.filters[tabInstalled].Value() != "":
 			return m.empty("No installed plugin matches.")
 		}
-		return m.empty("No plugins installed yet. Press tab to browse the marketplace.")
+		return m.empty("No plugins installed yet." + m.press(actSwitch, "to browse the marketplace"))
 	}
 	terms := market.Terms(m.filters[tabInstalled].Value())
 	var out []string
@@ -470,7 +488,7 @@ func (m *model) browseItems() []string {
 	t := m.theme
 	entries := m.visibleEntries()
 	if src, ok := m.typedSource(); ok {
-		return m.empty("Not in the marketplace. Press enter to preview " + src.String() + " from GitHub.")
+		return m.empty("Not in the marketplace." + m.press(actOpen, "to preview "+src.String()+" from GitHub"))
 	}
 	if len(entries) == 0 {
 		if m.indexLoading || m.indexErr != nil {
@@ -652,7 +670,7 @@ func (m *model) installedDetail(d *detail) []string {
 		case ch.Err != nil:
 			line = t.err.Render(safe.Line(ch.Err.Error()))
 		case ch.Result.Kind == updates.Available:
-			line = t.warn.Render(line) + t.faint.Render(" · u to review the update")
+			line = t.warn.Render(line) + t.faint.Render(m.keyHint(actUpdate, "to review the update"))
 		}
 		sections = append(sections, manager.Section{Title: "Update", Lines: []string{line}})
 	}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/vika2603/herdr-plugin-manager/internal/app"
 	"github.com/vika2603/herdr-plugin-manager/internal/cli"
+	"github.com/vika2603/herdr-plugin-manager/internal/config"
 	"github.com/vika2603/herdr-plugin-manager/internal/manager"
 	"github.com/vika2603/herdr-plugin-manager/internal/safe"
 	"github.com/vika2603/herdr-plugin-manager/internal/ui"
@@ -65,9 +66,11 @@ func onOpen(ctx context.Context, env *plugin.Env) error {
 }
 
 func onManager(ctx context.Context, env *plugin.Env) error {
-	return ui.Run(ctx, app.ForPlugin(env), ui.Options{SelfID: env.PluginID})
+	cfg, err := config.Load(env.ConfigDir)
+	return ui.Run(ctx, app.ForPlugin(env), ui.Options{SelfID: env.PluginID, Keys: cfg.Keys, ConfigErr: err})
 }
 
 func runTerminal(ctx context.Context, m *manager.Manager) error {
-	return ui.Run(ctx, m, ui.Options{AltScreen: true})
+	cfg, err := config.Load(app.ConfigDir(ctx, m))
+	return ui.Run(ctx, m, ui.Options{AltScreen: true, Keys: cfg.Keys, ConfigErr: err})
 }

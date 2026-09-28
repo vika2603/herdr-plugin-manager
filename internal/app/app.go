@@ -5,6 +5,8 @@
 package app
 
 import (
+	"cmp"
+	"context"
 	"os"
 	"path/filepath"
 
@@ -23,6 +25,9 @@ const Version = "0.1.1"
 
 // Name is the command name.
 const Name = "hpm"
+
+// PluginID is the id herdr-plugin.toml declares.
+const PluginID = "vika2603.plugin-manager"
 
 // longName names the cache directory and the HTTP user agent, where the
 // short command name could be mistaken for another tool's.
@@ -50,8 +55,10 @@ func Standalone() *manager.Manager {
 }
 
 func base() *manager.Manager {
+	mc := market.NewClient(cacheDir(), longName+"/"+Version)
+	mc.Token = cmp.Or(os.Getenv("GH_TOKEN"), os.Getenv("GITHUB_TOKEN"))
 	return &manager.Manager{
-		Market:   market.NewClient(cacheDir(), longName+"/"+Version),
+		Market:   mc,
 		Git:      updates.Git{},
 		Platform: compat.Platform(),
 	}
@@ -65,4 +72,14 @@ func cacheDir() string {
 		return ""
 	}
 	return filepath.Join(dir, longName)
+}
+
+// ConfigDir is the plugin's config directory as herdr reports it, where the
+// popup reads its config too; "" when herdr cannot say.
+func ConfigDir(ctx context.Context, m *manager.Manager) string {
+	dir, err := m.CLI.ConfigDir(ctx, PluginID)
+	if err != nil {
+		return ""
+	}
+	return dir
 }

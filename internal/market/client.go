@@ -36,7 +36,10 @@ type Client struct {
 	MaxAge   time.Duration
 	// UserAgent identifies the manager to herdr.dev and GitHub.
 	UserAgent string
-	Now       func() time.Time
+	// Token authenticates requests to GitHub's API, which raises its rate
+	// limit. Empty sends none.
+	Token string
+	Now   func() time.Time
 }
 
 // NewClient returns a client for the public index, caching under cacheDir.
@@ -121,6 +124,11 @@ func (c *Client) File(ctx context.Context, src source.GitHub, ref, path string) 
 }
 
 func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
+	return c.fetch(ctx, url, nil)
+}
+
+// fetch downloads url; header, when set, adds request headers.
+func (c *Client) fetch(ctx context.Context, url string, header func(http.Header)) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return nil, err
@@ -128,15 +136,20 @@ func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
 	if c.UserAgent != "" {
 		req.Header.Set("User-Agent", c.UserAgent)
 	}
+	if header != nil {
+		header(req.Header)
+	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	switch resp.StatusCode {
-	case http.StatusOK:
-	case http.StatusNotFound:
+	switch {
+	case resp.StatusCode == http.StatusOK:
+	case resp.StatusCode == http.StatusNotFound:
 		return nil, fmt.Errorf("GET %s: %w", url, ErrNotFound)
+	case resp.StatusCode == http.StatusTooManyRequests || resp.Header.Get("X-RateLimit-Remaining") == "0":
+		return nil, fmt.Errorf("GET %s: %w", url, ErrRateLimited)
 	default:
 		return nil, fmt.Errorf("GET %s: %s", url, resp.Status)
 	}

@@ -85,6 +85,22 @@ func (r Runner) Version(ctx context.Context) (string, error) {
 	return fields[1], nil
 }
 
+// ConfigDir is the directory herdr keeps plugin id's configuration in,
+// which it hands the plugin itself as HERDR_PLUGIN_CONFIG_DIR.
+func (r Runner) ConfigDir(ctx context.Context, id string) (string, error) {
+	var stdout, stderr bytes.Buffer
+	cmd := r.command(ctx, []string{"plugin", "config-dir", id})
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return "", commandError(cmd.Args, err, stderr.String())
+	}
+	dir := strings.TrimSpace(stdout.String())
+	if dir == "" || strings.Contains(dir, "\n") {
+		return "", fmt.Errorf("unexpected herdr plugin config-dir output %q", dir)
+	}
+	return dir, nil
+}
+
 func (r Runner) run(ctx context.Context, args []string, out io.Writer) error {
 	if out == nil {
 		out = io.Discard

@@ -26,16 +26,20 @@ func (m *model) wheel(ms tea.Mouse) {
 		return
 	}
 	up := ms.Button == tea.MouseWheelUp
-	k, lines := "down", wheelLines
+	a, lines := actDown, wheelLines
 	if up {
-		k, lines = "up", -wheelLines
+		a, lines = actUp, -wheelLines
 	}
 	switch m.screen {
 	case screenList:
-		m.move(k)
+		m.move(a)
 	case screenDetail:
 		if d := m.detail; d.versions != nil {
-			m.keyVersions(d, k)
+			if ms.X >= d.versions.listWidth {
+				d.versions.notesOffset = max(d.versions.notesOffset+lines, 0)
+			} else {
+				m.keyVersions(d, a)
+			}
 		} else {
 			d.offsets[d.view] = max(d.offsets[d.view]+lines, 0)
 		}
@@ -45,7 +49,7 @@ func (m *model) wheel(ms tea.Mouse) {
 }
 
 // click selects what is under the pointer; clicking the selected item again
-// opens it, as enter would.
+// opens it.
 func (m *model) click(ms tea.Mouse) tea.Cmd {
 	if m.confirm != nil || ms.Button != tea.MouseLeft {
 		return nil
@@ -80,20 +84,21 @@ func (m *model) clickList(ms tea.Mouse) tea.Cmd {
 		m.cursor[m.tab] = i
 		return nil
 	}
-	_, cmd := m.keyList("enter")
+	_, cmd := m.listAction(actOpen)
 	return cmd
 }
 
 func (m *model) clickDetail(ms tea.Mouse) tea.Cmd {
 	d := m.detail
 	if vp := d.versions; vp != nil {
-		i := ms.Y - detailBodyTop + d.offsets[viewInfo] - versionsTop
+		row := ms.Y - detailBodyTop - versionsTop
+		i := vp.offset + row
 		switch {
-		case i < 0 || i >= len(vp.refs):
+		case ms.X >= vp.listWidth || row < 0 || i >= len(vp.refs):
 		case i == vp.cursor:
 			return m.chooseVersion(d, vp.refs[i])
 		default:
-			vp.cursor = i
+			m.selectVersion(d, i)
 		}
 		return nil
 	}

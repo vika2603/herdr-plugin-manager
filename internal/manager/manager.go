@@ -334,6 +334,12 @@ func (m *Manager) CheckAll(ctx context.Context, plugins []herdr.InstalledPluginI
 	return out
 }
 
+// Releases lists the published releases of src's repository, the newest
+// first.
+func (m *Manager) Releases(ctx context.Context, src source.GitHub) ([]market.Release, error) {
+	return m.Market.Releases(ctx, src)
+}
+
 // Index loads the marketplace index.
 func (m *Manager) Index(ctx context.Context, refresh bool) (*market.Index, market.Status, error) {
 	return m.Market.Load(ctx, refresh)

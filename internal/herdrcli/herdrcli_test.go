@@ -99,6 +99,17 @@ func TestVersion(t *testing.T) {
 	}
 }
 
+func TestConfigDir(t *testing.T) {
+	r, argsFile := fakeHerdr(t, `echo "/home/u/.config/herdr/plugins/config/o.r"`)
+	dir, err := r.ConfigDir(context.Background(), "o.r")
+	if err != nil || dir != "/home/u/.config/herdr/plugins/config/o.r" {
+		t.Fatalf("ConfigDir = %q, %v", dir, err)
+	}
+	if data, _ := os.ReadFile(argsFile); string(data) != "plugin\nconfig-dir\no.r\n" {
+		t.Errorf("args = %q", data)
+	}
+}
+
 func TestCommandEnvDropsPluginContext(t *testing.T) {
 	r, _ := fakeHerdr(t, `env > "$(dirname "$0")/env.txt"`)
 	t.Setenv("HERDR_PLUGIN_ID", "manager")

@@ -40,6 +40,8 @@ type fakeBackend struct {
 	// previewGate, when set, keeps Preview reading its plugin list until it
 	// is closed.
 	previewGate chan struct{}
+	// releases are what Releases returns.
+	releases []market.Release
 }
 
 func (f *fakeBackend) record(format string, args ...any) {
@@ -81,6 +83,11 @@ func (f *fakeBackend) Install(ctx context.Context, src source.GitHub, ref, _ str
 func (f *fakeBackend) RemoteReadme(_ context.Context, src source.GitHub, ref string) (*manager.Readme, error) {
 	f.record("readme %s %q", src, ref)
 	return &manager.Readme{Markdown: "# Gadget\n\nDoes **gadget** things.", Location: "https://example/README.md"}, nil
+}
+
+func (f *fakeBackend) Releases(_ context.Context, src source.GitHub) ([]market.Release, error) {
+	f.record("releases %s", src)
+	return f.releases, nil
 }
 
 func (*fakeBackend) InstalledReadme(p herdr.InstalledPluginInfo) (*manager.Readme, error) {
@@ -321,7 +328,7 @@ func TestUpdateShowsPreviewFirst(t *testing.T) {
 	if !strings.Contains(h.screen(), "Installed › Update alpha") {
 		t.Fatalf("update preview not shown:\n%s", h.screen())
 	}
-	h.press("enter")
+	h.press("u")
 	if got := b.Calls(); len(got) != 2 || got[1] != "update alpha v1.1.0" {
 		t.Fatalf("calls = %q", got)
 	}
@@ -359,7 +366,7 @@ func TestUpdateUsesCurrentEnabledState(t *testing.T) {
 	b := newFake()
 	h := start(t, b)
 	// alpha was enabled when its update was checked; disable it, then update.
-	h.press("space", "u", "enter")
+	h.press("space", "u", "u")
 	if got := b.Calls(); len(got) < 3 || got[0] != "set-enabled alpha false" || !strings.HasPrefix(got[2], "update alpha") {
 		t.Fatalf("calls = %q", got)
 	}
@@ -388,7 +395,7 @@ func TestBrowseInstall(t *testing.T) {
 	if out := h.screen(); !strings.Contains(out, "Does gadget things.") {
 		t.Fatalf("tab should show the README:\n%s", out)
 	}
-	h.press("enter")
+	h.press("i")
 	if got := b.Calls(); len(got) != 3 || got[2] != `install carol/gadget ""` {
 		t.Fatalf("calls = %q", got)
 	}
@@ -459,7 +466,7 @@ func TestVersionPickerReloadsAndInstallsTheChosenRef(t *testing.T) {
 	if got := b.Calls(); got[len(got)-1] != `preview carol/gadget "v1.0.0"` {
 		t.Fatalf("calls = %q, want the preview reloaded at v1.0.0", got)
 	}
-	h.press("enter")
+	h.press("i")
 	if got := b.Calls(); got[len(got)-1] != `install carol/gadget "v1.0.0"` {
 		t.Errorf("calls = %q, want v1.0.0 installed", got)
 	}
@@ -469,7 +476,7 @@ func TestPreviewWithProblemsDoesNotInstall(t *testing.T) {
 	b := newFake()
 	b.preview.Problems = []string{"requires herdr 9.9.9, running 0.9.1"}
 	h := start(t, b)
-	h.press("tab", "enter", "enter")
+	h.press("tab", "enter", "i")
 	for _, c := range b.Calls() {
 		if strings.HasPrefix(c, "install") {
 			t.Fatalf("installed despite problems: %q", b.Calls())
@@ -484,7 +491,7 @@ func TestFailedInstallShowsOutput(t *testing.T) {
 	b := newFake()
 	b.installErr = errors.New("build failed")
 	h := start(t, b)
-	h.press("tab", "enter", "enter")
+	h.press("tab", "enter", "i")
 	if h.m.screen != screenOutput {
 		t.Fatalf("screen = %v, want output", h.m.screen)
 	}
@@ -510,11 +517,45 @@ func TestFilterNarrowsList(t *testing.T) {
 func TestQuitWaitsForOperation(t *testing.T) {
 	h := start(t, newFake())
 	h.m.busy = "Installing x"
-	if _, cmd := h.m.Update(keyMsg("q")); cmd != nil {
+	if _, cmd := h.m.Update(keyMsg("q")); quits(cmd) {
 		t.Fatal("q quit while an operation was running")
 	}
-	if _, cmd := h.m.Update(keyMsg("ctrl+c")); cmd == nil {
+	if _, cmd := h.m.Update(keyMsg("ctrl+c")); !quits(cmd) {
 		t.Fatal("ctrl+c did not quit")
+	}
+}
+
+// quits reports whether cmd, or a command it batches, ends the program.
+// Commands that do not return promptly, such as timers, are skipped.
+func quits(cmd tea.Cmd) bool {
+	if cmd == nil {
+		return false
+	}
+	msg, ok := runCmd(cmd)
+	switch msg := msg.(type) {
+	case tea.QuitMsg:
+		return ok
+	case tea.BatchMsg:
+		return slices.ContainsFunc(msg, quits)
+	}
+	return false
+}
+
+func TestStatusClearsItself(t *testing.T) {
+	h := start(t, newFake())
+	h.press("w")
+	gen := h.m.statusGen
+	if h.m.status == "" {
+		t.Fatal("w set no status")
+	}
+	h.m.setStatus("newer", false)
+	h.m.Update(statusExpiredMsg{gen})
+	if h.m.status != "newer" {
+		t.Errorf("an older timer cleared a newer status: %q", h.m.status)
+	}
+	h.m.Update(statusExpiredMsg{h.m.statusGen})
+	if h.m.status != "" {
+		t.Errorf("the status outlived its timer: %q", h.m.status)
 	}
 }
 
@@ -692,15 +733,6 @@ func TestMovingWhileTyping(t *testing.T) {
 	}
 }
 
-func TestPagerAliasesOutsideTyping(t *testing.T) {
-	if navAlias("ctrl+u", false) != "pgup" || navAlias("ctrl+u", true) != "ctrl+u" {
-		t.Error("ctrl+u pages up in lists but stays with the text field while typing")
-	}
-	if navAlias("ctrl+n", true) != "down" || navAlias("j", true) != "j" {
-		t.Error("ctrl+n moves while typing; j is typed")
-	}
-}
-
 func (h *harness) mouse(msg tea.Msg) {
 	h.t.Helper()
 	_, cmd := h.m.Update(msg)
@@ -767,5 +799,64 @@ func TestMouseChoosesAVersion(t *testing.T) {
 	h.mouse(click)
 	if got := b.Calls(); got[len(got)-1] != `preview carol/gadget "v1.0.0"` {
 		t.Errorf("a second click should choose it: calls %q", got)
+	}
+}
+
+func TestVersionPickerShowsReleaseNotes(t *testing.T) {
+	b := newFake()
+	b.preview.Ref, b.preview.DefaultBranch = "v1.1.0", "main"
+	b.preview.Releases = []string{"v1.1.0", "v1.0.0"}
+	b.releases = []market.Release{{Tag: "v1.1.0", Name: "Faster gadgets", Notes: "Gadgets start **twice** as fast."}}
+	h := start(t, b)
+	h.press("tab", "enter", "v")
+	out := h.screen()
+	for _, want := range []string{"Faster gadgets", "Gadgets start twice as fast."} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the notes of v1.1.0 lack %q:\n%s", want, out)
+		}
+	}
+	h.press("down")
+	if !strings.Contains(h.screen(), "This tag has no GitHub release") {
+		t.Errorf("v1.0.0 has no release:\n%s", h.screen())
+	}
+	h.press("esc", "v")
+	n := 0
+	for _, c := range b.Calls() {
+		if strings.HasPrefix(c, "releases") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("releases read %d times, want once for the session", n)
+	}
+}
+
+func TestVersionPickerExplainsTheRateLimit(t *testing.T) {
+	b := &rateLimited{newFake()}
+	b.preview.Ref, b.preview.Releases = "v1.1.0", []string{"v1.1.0"}
+	h := start(t, b)
+	h.press("tab", "enter", "v")
+	if !strings.Contains(h.screen(), "set GH_TOKEN") {
+		t.Errorf("the notes column should say how to raise the limit:\n%s", h.screen())
+	}
+}
+
+type rateLimited struct{ *fakeBackend }
+
+func (*rateLimited) Releases(context.Context, source.GitHub) ([]market.Release, error) {
+	return nil, fmt.Errorf("read the releases: %w", market.ErrRateLimited)
+}
+
+func TestEnterInAPreviewDoesNotInstall(t *testing.T) {
+	b := newFake()
+	h := start(t, b)
+	h.press("tab", "enter", "enter")
+	for _, c := range b.Calls() {
+		if strings.HasPrefix(c, "install") {
+			t.Fatalf("a second enter installed: %q", b.Calls())
+		}
+	}
+	if !strings.Contains(h.screen(), "Press i to install") {
+		t.Errorf("no hint for the install key:\n%s", h.screen())
 	}
 }

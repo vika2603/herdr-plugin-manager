@@ -4,6 +4,7 @@ package ui
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -39,6 +40,7 @@ type Backend interface {
 	Index(ctx context.Context, refresh bool) (*market.Index, market.Status, error)
 	Preview(ctx context.Context, src source.GitHub, ref, hint, herdrVersion string, installed []herdr.InstalledPluginInfo) (*manager.Preview, error)
 	RemoteReadme(ctx context.Context, src source.GitHub, commit string) (*manager.Readme, error)
+	Releases(ctx context.Context, src source.GitHub) ([]market.Release, error)
 	InstalledReadme(p herdr.InstalledPluginInfo) (*manager.Readme, error)
 	OpenURL(ctx context.Context, url string) error
 }
@@ -53,6 +55,11 @@ type Options struct {
 	// SelfID is the manager's own plugin id when it runs as a plugin. The
 	// list refuses to remove or disable it before asking for confirmation.
 	SelfID string
+	// Keys replaces the keys of actions, by action name, as the [keys] table
+	// of the config file does.
+	Keys map[string][]string
+	// ConfigErr is a problem reading the config file, shown on start.
+	ConfigErr error
 }
 
 // Run runs the manager until the user quits or ctx ends. A context ended by
@@ -126,7 +133,12 @@ type model struct {
 	detail  *detail
 	confirm *confirm
 	// readmes keeps the READMEs read in this session, by source and ref.
-	readmes map[string]cachedReadme
+	// keys is what each key does, and helpKeys how the help bar shows them.
+	keys     keymap
+	helpKeys helpKeys
+	readmes  map[string]cachedReadme
+	// releases are the release notes read in the session, by repository.
+	releases map[string]cachedReleases
 
 	theme    theme
 	help     help.Model
@@ -142,6 +154,9 @@ type model struct {
 
 	status    string
 	statusErr bool
+	// statusGen counts the statuses set, so that a status is only cleared
+	// by the timer started when it was set.
+	statusGen int
 }
 
 // detail is the scrollable view of one plugin: an installed one, or the
@@ -157,7 +172,7 @@ type detail struct {
 	loading bool
 	preview *manager.Preview
 	err     error
-	// install or update is what enter does on a preview.
+	// install or update is what i or u does on a preview.
 	install *installTarget
 	update  *manager.Checked
 	// entry is the marketplace listing an install was opened from.
@@ -204,17 +219,27 @@ func newModel(ctx context.Context, b Backend, opts Options) *model {
 		b:       b,
 		opts:    opts,
 		checks:  map[string]manager.Checked{},
-		readmes: map[string]cachedReadme{},
+		readmes: map[string]cachedReadme{}, releases: map[string]cachedReleases{},
 		help:    help.New(),
 		spinner: spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 	}
 	for i := range m.filters {
 		f := textinput.New()
-		f.Prompt = "/ "
 		f.Placeholder = "filter installed plugins"
 		m.filters[i] = f
 	}
 	m.filters[tabBrowse].Placeholder = "search the marketplace"
+	var err error
+	if m.keys, err = newKeymap(opts.Keys); err != nil {
+		m.setStatus(err.Error()+"; using the default keys", true)
+	}
+	if opts.ConfigErr != nil {
+		m.setStatus(opts.ConfigErr.Error(), true)
+	}
+	m.helpKeys = newHelpKeys(m.keys)
+	for i := range m.filters {
+		m.filters[i].Prompt = cmp.Or(m.keys.name(actSearch), "›") + " "
+	}
 	// Dark until the terminal reports its background, which a herdr popup
 	// may never do.
 	m.applyTheme(newTheme(true))
@@ -517,6 +542,25 @@ func (m *model) rowCount() int {
 // output screen (o) keeps the whole of an operation's output.
 func (m *model) setStatus(text string, isErr bool) {
 	m.status, m.statusErr = oneLine(text), isErr
+	m.statusGen++
+}
+
+// How long a status stays: an error longer, since it may need reading.
+const (
+	statusTimeout      = 5 * time.Second
+	errorStatusTimeout = 10 * time.Second
+)
+
+type statusExpiredMsg struct{ gen int }
+
+// expireStatus clears the status set last once it has been shown long
+// enough, unless another replaced it meanwhile.
+func (m *model) expireStatus() tea.Cmd {
+	gen, wait := m.statusGen, statusTimeout
+	if m.statusErr {
+		wait = errorStatusTimeout
+	}
+	return tea.Tick(wait, func(time.Time) tea.Msg { return statusExpiredMsg{gen} })
 }
 
 // oneLine is the first line of s, made printable, marked when more followed.
