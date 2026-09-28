@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/vika2603/herdr-plugin-manager/internal/config"
 )
 
 func TestTypingKeepsTheTextFieldKeys(t *testing.T) {
@@ -53,7 +55,7 @@ func TestKeymapOverrides(t *testing.T) {
 
 func TestConfiguredKeysDriveTheUI(t *testing.T) {
 	b := newFake()
-	h := &harness{t: t, m: newModel(context.Background(), b, Options{Keys: map[string][]string{"install": {"I"}, "switch": {"]"}}})}
+	h := &harness{t: t, m: newModel(context.Background(), b, Options{Config: config.Config{Keys: map[string][]string{"install": {"I"}, "switch": {"]"}}}})}
 	h.m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	h.run(h.m.Init())
 	if !strings.Contains(h.screen(), "Press ] for the marketplace") {
@@ -76,7 +78,7 @@ func TestConfiguredKeysDriveTheUI(t *testing.T) {
 }
 
 func TestABadConfigFallsBackToTheDefaults(t *testing.T) {
-	h := &harness{t: t, m: newModel(context.Background(), newFake(), Options{Keys: map[string][]string{"install": {"u"}}})}
+	h := &harness{t: t, m: newModel(context.Background(), newFake(), Options{Config: config.Config{Keys: map[string][]string{"install": {"u"}}}})}
 	h.m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	if !strings.Contains(h.screen(), "using the default keys") || h.m.keys.name(actInstall) != "i" {
 		t.Errorf("a conflict should be reported and the defaults used:\n%s", h.screen())

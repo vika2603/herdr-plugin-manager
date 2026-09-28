@@ -279,10 +279,20 @@ func (h *harness) screen() string {
 	return ansi.Strip(h.m.View().Content)
 }
 
+// words is the screen with every run of spaces made one, so a check does not
+// depend on how many columns separate two words.
+func (h *harness) words() string {
+	lines := strings.Split(h.screen(), "\n")
+	for i, l := range lines {
+		lines[i] = strings.Join(strings.Fields(l), " ")
+	}
+	return strings.Join(lines, "\n")
+}
+
 func TestListShowsPluginsAndUpdates(t *testing.T) {
 	h := start(t, newFake())
-	out := h.screen()
-	for _, want := range []string{"Installed 2", "Marketplace 1", "alpha", "update → v1.1.0", "beta", "1 update available"} {
+	out := h.words()
+	for _, want := range []string{"Installed 2", "Marketplace 1", "alpha", "↑ v1.1.0", "beta", "↑ 1 update"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("screen lacks %q:\n%s", want, out)
 		}
@@ -379,11 +389,11 @@ func TestBrowseInstall(t *testing.T) {
 	b := newFake()
 	h := start(t, b)
 	h.press("tab")
-	if !strings.Contains(h.screen(), "Gadget 0.1.0") {
+	if !strings.Contains(h.words(), "Gadget 0.1.0") {
 		t.Fatalf("browse tab lacks the entry:\n%s", h.screen())
 	}
 	h.press("enter")
-	if !strings.Contains(h.screen(), "Gadget 0.1.0 (carol.gadget)") {
+	if !strings.Contains(h.words(), "Gadget 0.1.0 · carol.gadget") {
 		t.Fatalf("the preview details should open first:\n%s", h.screen())
 	}
 	for _, c := range b.Calls() {
@@ -409,8 +419,8 @@ func TestInstallDetailShowsTheListingWhileThePreviewLoads(t *testing.T) {
 	h := start(t, b)
 	h.press("tab")
 	_, cmd := h.m.Update(keyMsg("enter"))
-	out := h.screen()
-	for _, want := range []string{"Gadget 0.1.0 (carol.gadget)", "source: carol/gadget"} {
+	out := h.words()
+	for _, want := range []string{"Gadget 0.1.0 · carol.gadget", "SOURCE carol/gadget"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("before the preview arrives the detail lacks %q:\n%s", want, out)
 		}
@@ -455,7 +465,7 @@ func TestVersionPickerReloadsAndInstallsTheChosenRef(t *testing.T) {
 	h := start(t, b)
 	h.press("tab", "enter", "v")
 	out := h.screen()
-	for _, want := range [][]string{{"Choose a version"}, {"v2.0.0-rc.1", "pre-release"}, {"v1.1.0", "latest", "shown"}, {"default branch (main)"}} {
+	for _, want := range [][]string{{"VERSIONS"}, {"v2.0.0-rc.1", "pre-release"}, {"v1.1.0", "latest", "shown"}, {"default branch (main)"}} {
 		if !slices.ContainsFunc(strings.Split(out, "\n"), func(line string) bool {
 			return !slices.ContainsFunc(want, func(w string) bool { return !strings.Contains(line, w) })
 		}) {
@@ -672,7 +682,7 @@ func TestDetailOpensOnInfoAndTabSwitches(t *testing.T) {
 	h := start(t, newFake())
 	h.press("enter")
 	out := h.screen()
-	if !strings.Contains(out, "Recent command logs") || !strings.Contains(out, "README") {
+	if !strings.Contains(out, "RECENT COMMAND LOGS") || !strings.Contains(out, "README") {
 		t.Fatalf("the information should open first, with a README tab:\n%s", out)
 	}
 	h.press("tab")
@@ -681,7 +691,7 @@ func TestDetailOpensOnInfoAndTabSwitches(t *testing.T) {
 		t.Fatalf("tab should show the installed README:\n%s", out)
 	}
 	h.press("tab")
-	if !strings.Contains(h.screen(), "Recent command logs") {
+	if !strings.Contains(h.screen(), "RECENT COMMAND LOGS") {
 		t.Fatalf("tab again should return to the information:\n%s", h.screen())
 	}
 }

@@ -50,9 +50,11 @@ func (p *Preview) RequireID(id string) {
 	}
 }
 
-// Section is a titled group of preview lines.
+// Section is a titled group of preview lines. Note, when set, qualifies
+// the title, such as when its commands run.
 type Section struct {
 	Title string
+	Note  string
 	Lines []string
 }
 
@@ -91,23 +93,29 @@ func (p *Preview) Sections() []Section {
 		out = append(out, Section{Title: "Manifest warnings", Lines: p.Warnings})
 	}
 
-	entries, hidden := p.entrypoints()
+	entries, hidden := p.Entrypoints()
 	if hidden > 0 {
 		out[0].Lines = append(out[0].Lines, fmt.Sprintf("%d entries for other platforms not shown", hidden))
 	}
 	out = append(out, entries...)
-	// The manifest is the plugin author's text; make every line printable.
-	for i := range out {
-		for j, line := range out[i].Lines {
-			out[i].Lines[j] = safe.Line(line)
-		}
-	}
-	return out
+	return printable(out)
 }
 
-// entrypoints lists what the manifest runs, one section per kind, leaving out
-// entries declared only for other platforms and counting them.
-func (p *Preview) entrypoints() (sections []Section, hidden int) {
+// printable makes every line printable: the manifest is the plugin author's
+// text.
+func printable(sections []Section) []Section {
+	for i := range sections {
+		for j, line := range sections[i].Lines {
+			sections[i].Lines[j] = safe.Line(line)
+		}
+	}
+	return sections
+}
+
+// Entrypoints lists what the manifest runs, one section per kind, made
+// printable. Entries declared only for other platforms are left out and
+// counted.
+func (p *Preview) Entrypoints() (sections []Section, hidden int) {
 	m := p.Manifest
 	applies := func(platforms []manifest.Platform) bool {
 		if p.Platform == "" || len(platforms) == 0 || slices.Contains(platforms, manifest.Platform(p.Platform)) {
@@ -149,18 +157,18 @@ func (p *Preview) entrypoints() (sections []Section, hidden int) {
 		}
 	}
 	for _, s := range []Section{
-		{"Build commands (run during install)", build},
-		{"Startup commands (run in every session)", startup},
-		{"Event hooks", events},
-		{"Actions", actions},
-		{"Panes", panes},
-		{"Link handlers", links},
+		{"Build commands", "run during install", build},
+		{"Startup commands", "run in every session", startup},
+		{"Event hooks", "", events},
+		{"Actions", "", actions},
+		{"Panes", "", panes},
+		{"Link handlers", "", links},
 	} {
 		if len(s.Lines) > 0 {
 			sections = append(sections, s)
 		}
 	}
-	return sections, hidden
+	return printable(sections), hidden
 }
 
 // firstFew lists up to n items and counts the rest.

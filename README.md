@@ -54,12 +54,19 @@ An install takes the latest release of a plugin at the root of its
 repository, else the default branch; `v` in the preview chooses another
 version and shows its release notes.
 
-`hpm keys` lists the keys and the config file that changes them:
+`hpm keys` lists the keys and the config file that changes them and the
+colours:
 
 ```toml
 [keys]
 install = ["I"]
+
+[theme]
+accent = "teal"    # indigo, teal, magenta or "#RRGGBB"
 ```
+
+[docs/design.md](docs/design.md) describes the interface's colours and
+components.
 
 | Command | Does |
 | --- | --- |

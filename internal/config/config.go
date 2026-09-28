@@ -18,7 +18,19 @@ const File = "config.toml"
 type Config struct {
 	// Keys replaces the keys of actions, by action name; `hpm keys` lists
 	// them.
-	Keys map[string][]string `toml:"keys"`
+	Keys  map[string][]string `toml:"keys"`
+	Theme Theme               `toml:"theme"`
+}
+
+// Theme picks the interface's colours; docs/design.md names the roles.
+type Theme struct {
+	// Accent is indigo, teal, magenta or a #RRGGBB colour.
+	Accent string `toml:"accent"`
+	// Mode is auto, which follows the terminal's background, dark or light.
+	Mode string `toml:"mode"`
+	// Dark and Light replace colours by role on each background.
+	Dark  map[string]string `toml:"dark"`
+	Light map[string]string `toml:"light"`
 }
 
 // Load reads the config file in dir. A missing file, or no dir, is the

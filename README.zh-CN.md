@@ -49,12 +49,17 @@ description = "Manage plugins"
 在预览里按 `i` 安装，预览会列出插件将运行的命令。安装位于仓库根目录的插件时默认装最新的 release，其他情况装默认分支；
 在预览里按 `v` 可以选择其他版本，并查看它的 release notes。
 
-`hpm keys` 列出所有按键，以及用来修改按键的配置文件：
+`hpm keys` 列出所有按键，以及用来修改按键和颜色的配置文件：
 
 ```toml
 [keys]
 install = ["I"]
+
+[theme]
+accent = "teal"    # indigo、teal、magenta 或 "#RRGGBB"
 ```
+
+界面的配色和组件规则见 [docs/design.md](docs/design.md)。
 
 | 命令 | 作用 |
 | --- | --- |

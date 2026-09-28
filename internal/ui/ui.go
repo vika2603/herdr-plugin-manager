@@ -19,6 +19,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/vika2603/herdr-client/herdr"
 
+	"github.com/vika2603/herdr-plugin-manager/internal/config"
 	"github.com/vika2603/herdr-plugin-manager/internal/manager"
 	"github.com/vika2603/herdr-plugin-manager/internal/market"
 	"github.com/vika2603/herdr-plugin-manager/internal/safe"
@@ -55,9 +56,8 @@ type Options struct {
 	// SelfID is the manager's own plugin id when it runs as a plugin. The
 	// list refuses to remove or disable it before asking for confirmation.
 	SelfID string
-	// Keys replaces the keys of actions, by action name, as the [keys] table
-	// of the config file does.
-	Keys map[string][]string
+	// Config is the config file's settings: keys and theme.
+	Config config.Config
 	// ConfigErr is a problem reading the config file, shown on start.
 	ConfigErr error
 }
@@ -133,6 +133,10 @@ type model struct {
 	detail  *detail
 	confirm *confirm
 	// readmes keeps the READMEs read in this session, by source and ref.
+	// palettes are the colours of the two backgrounds, and themeMode the
+	// config's choice between them; "" or auto follows the terminal.
+	palettes  [2]palette
+	themeMode string
 	// keys is what each key does, and helpKeys how the help bar shows them.
 	keys     keymap
 	helpKeys helpKeys
@@ -230,9 +234,18 @@ func newModel(ctx context.Context, b Backend, opts Options) *model {
 	}
 	m.filters[tabBrowse].Placeholder = "search the marketplace"
 	var err error
-	if m.keys, err = newKeymap(opts.Keys); err != nil {
+	if m.keys, err = newKeymap(opts.Config.Keys); err != nil {
 		m.setStatus(err.Error()+"; using the default keys", true)
 	}
+	if m.palettes, err = palettes(opts.Config.Theme); err != nil {
+		m.setStatus(err.Error()+"; using the default colours", true)
+	}
+	mode := opts.Config.Theme.Mode
+	if !validMode(mode) {
+		m.setStatus(fmt.Sprintf("config: theme mode %q is not auto, dark or light", mode), true)
+		mode = ""
+	}
+	m.themeMode = mode
 	if opts.ConfigErr != nil {
 		m.setStatus(opts.ConfigErr.Error(), true)
 	}
@@ -241,8 +254,8 @@ func newModel(ctx context.Context, b Backend, opts Options) *model {
 		m.filters[i].Prompt = cmp.Or(m.keys.name(actSearch), "›") + " "
 	}
 	// Dark until the terminal reports its background, which a herdr popup
-	// may never do.
-	m.applyTheme(newTheme(true))
+	// may never do, unless the config fixes it.
+	m.applyTheme(themeFor(m.themeMode != "light", m.palettes))
 	return m
 }
 

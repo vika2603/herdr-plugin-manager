@@ -558,7 +558,7 @@ func (c *cli) logsCmd() *cobra.Command {
 func (c *cli) keysCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "keys",
-		Short: "List the keys of the interactive manager, and where to change them",
+		Short: "List the keys of the interactive manager, and the config file",
 		Long: "List what each key does in the popup and in the terminal manager. To change\n" +
 			"them, give an action its keys in the [keys] table of the config file, such as\n" +
 			"  install = [\"I\"]\n" +
@@ -707,7 +707,11 @@ func printSections(w io.Writer, sections []manager.Section) {
 		if i > 0 {
 			fmt.Fprintln(w)
 		}
-		fmt.Fprintln(w, s.Title)
+		if s.Note != "" {
+			fmt.Fprintf(w, "%s (%s)\n", s.Title, s.Note)
+		} else {
+			fmt.Fprintln(w, s.Title)
+		}
 		for _, line := range s.Lines {
 			fmt.Fprintln(w, "  "+line)
 		}

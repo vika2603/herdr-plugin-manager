@@ -39,7 +39,9 @@ func (m *model) handle(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clamp(tabBrowse)
 		return m, nil
 	case tea.BackgroundColorMsg:
-		m.applyTheme(newTheme(msg.IsDark()))
+		if m.themeMode == "" || m.themeMode == "auto" {
+			m.applyTheme(themeFor(msg.IsDark(), m.palettes))
+		}
 		return m, nil
 	case spinner.TickMsg:
 		if !m.spinning() {

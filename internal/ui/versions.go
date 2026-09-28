@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/vika2603/herdr-plugin-manager/internal/market"
@@ -196,14 +197,8 @@ func (m *model) versionList(d *detail) []string {
 	vp := d.versions
 	p := d.preview
 	shown := shownRef(d)
-	latest := ""
-	for _, tag := range p.Releases {
-		if !updates.IsPrerelease(tag) {
-			latest = tag
-			break
-		}
-	}
-	out := []string{"  " + t.heading.Render("Choose a version"), ""}
+	latest := latestRelease(p.Releases)
+	out := []string{m.heading("Versions", "", t.faint), ""}
 	end := min(vp.offset+m.listRows(), len(vp.refs))
 	for i := vp.offset; i < end; i++ {
 		ref := vp.refs[i]
@@ -211,19 +206,19 @@ func (m *model) versionList(d *detail) []string {
 		if ref == p.DefaultBranch && i == len(vp.refs)-1 {
 			label = "default branch (" + ref + ")"
 		}
-		style, bar := t.itemTitle, "   "
+		style, bar := t.text, "   "
 		if i == vp.cursor {
-			style, bar = t.selTitle, " "+t.selBar.Render("│")+" "
+			style, bar = t.bold, " "+t.selBar.Render(glyphSelected)+" "
 		}
 		line := bar + style.Render(label)
 		switch {
 		case ref == latest:
-			line += " " + t.badgeInstalled.Render("latest")
+			line += "  " + t.ok.Render("latest")
 		case updates.IsPrerelease(ref):
-			line += " " + t.faint.Render("pre-release")
+			line += "  " + mark(t.faint, glyphPre, "pre-release")
 		}
 		if ref == shown {
-			line += " " + t.faint.Render("· shown")
+			line += "  " + t.faint.Render("· shown")
 		}
 		out = append(out, line)
 	}
@@ -235,17 +230,20 @@ func (m *model) notesColumn(d *detail, width int) []string {
 	t := m.theme
 	vp := d.versions
 	ref := vp.refs[vp.cursor]
+	say := func(style lipgloss.Style, text string) []string {
+		return []string{t.bold.Render(ref), "", style.Render(text)}
+	}
 	if ref == d.preview.DefaultBranch && vp.cursor == len(vp.refs)-1 {
-		return []string{t.heading.Render(ref), "", t.faint.Render("The default branch as it is now. It has no release notes.")}
+		return say(t.faint, "The default branch as it is now. It has no release notes.")
 	}
 	cached, ok := m.releases[d.install.src.Repository()]
 	switch {
 	case vp.loading || !ok:
-		return []string{t.heading.Render(ref), "", t.faint.Render("Reading the release notes…")}
+		return say(t.faint, "Reading the release notes…")
 	case errors.Is(cached.err, market.ErrRateLimited):
-		return []string{t.heading.Render(ref), "", t.warn.Render(market.ErrRateLimited.Error())}
+		return say(t.warn, glyphWarning+" "+market.ErrRateLimited.Error())
 	case cached.err != nil:
-		return []string{t.heading.Render(ref), "", t.err.Render(oneLine(cached.err.Error()))}
+		return say(t.err, glyphFailed+" "+oneLine(cached.err.Error()))
 	}
 	var rel *market.Release
 	for i := range cached.list {
@@ -254,11 +252,11 @@ func (m *model) notesColumn(d *detail, width int) []string {
 		}
 	}
 	if rel == nil {
-		return []string{t.heading.Render(ref), "", t.faint.Render("This tag has no GitHub release, so no notes.")}
+		return say(t.faint, "This tag has no GitHub release, so no notes.")
 	}
-	heading := t.heading.Render(ref)
+	heading := t.bold.Render(ref)
 	if rel.Name != "" && rel.Name != ref {
-		heading += " " + t.itemTitle.Render(rel.Name)
+		heading += "  " + t.text.Render(rel.Name)
 	}
 	if !rel.PublishedAt.IsZero() {
 		heading += t.faint.Render(" · " + rel.PublishedAt.Format("2006-01-02"))
@@ -271,7 +269,7 @@ func (m *model) notesColumn(d *detail, width int) []string {
 	}
 	lines, ok := vp.rendered[ref]
 	if !ok {
-		lines = append(m.render(rel.Notes, width), "", "  "+t.faint.Render(safe.Line(rel.URL)))
+		lines = append(m.render(rel.Notes, width), "", indent+t.faint.Render(safe.Line(rel.URL)))
 		vp.rendered[ref] = lines
 	}
 	vp.notesOffset = min(vp.notesOffset, max(len(lines)-m.listRows(), 0))

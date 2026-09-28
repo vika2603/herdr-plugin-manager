@@ -192,15 +192,15 @@ func (m *model) frame(top []string, filter *string, body []string) string {
 
 func (m *model) dialog(height int) string {
 	t := m.theme
-	box := t.dialog.Render(t.itemTitle.Bold(true).Render(m.confirm.prompt) + "\n\n" +
-		t.faint.Render(m.keys.name(actConfirm)+" confirm · any other key cancels"))
+	box := t.dialog.Render(t.bold.Render(m.confirm.prompt) + "\n\n" +
+		t.keyChipMain.Render(m.keys.name(actConfirm)) + " " + t.keyDesc.Render("confirm") + "   " + t.faint.Render("any other key cancels"))
 	return lipgloss.Place(m.w(), height, lipgloss.Center, lipgloss.Center, box)
 }
 
 // tabRow draws tab labels over an underline that runs the full width, thick
-// under the active tab. The list's tabs and a plugin's README and Info views
-// use the same row, so a tab looks the same wherever it appears. A label's
-// count is drawn after it when counts is not nil.
+// and in the accent under the active tab. The list's tabs and a plugin's
+// README and Info views use the same row, so a tab looks the same wherever
+// it appears. A label's count is drawn after it when counts is not nil.
 func (m *model) tabRow(names []string, counts []int, active int) (labels, underline string) {
 	t := m.theme
 	var l, u strings.Builder
@@ -214,7 +214,7 @@ func (m *model) tabRow(names []string, counts []int, active int) (labels, underl
 		width := ansi.StringWidth(tabCell(names, counts, i))
 		nameStyle, countStyle, line, glyph := t.tabInactive, t.tabCount, t.rule, "─"
 		if i == active {
-			nameStyle, countStyle, line, glyph = t.tabActive, t.tabActive.UnsetBold(), t.tabLine, "━"
+			nameStyle, countStyle, line, glyph = t.tabActive, t.accent, t.accent, "━"
 		}
 		l.WriteString(" " + nameStyle.Render(name) + " ")
 		if count != "" {
@@ -236,7 +236,7 @@ func (m *model) tabBar() []string {
 	return []string{
 		spread(labels, m.versionLabel(), m.w()),
 		underline,
-		"  " + m.theme.intro.Render(m.tabIntro(m.tab)),
+		indent + m.theme.fg2.Render(m.tabIntro(m.tab)),
 	}
 }
 
@@ -244,15 +244,15 @@ func (m *model) tabBar() []string {
 // what it shows.
 func (m *model) crumbs(from, title string) []string {
 	t := m.theme
-	left := "  " + t.crumb.Render(from+" ›") + " " + t.crumbTitle.Render(title)
+	left := indent + t.faint.Render(from+" ›") + " " + t.bold.Render(title)
 	return []string{spread(left, m.versionLabel(), m.w()), t.rule.Render(strings.Repeat("─", m.w()))}
 }
 
 func (m *model) versionLabel() string {
 	if m.herdrVersion == "" {
-		return m.theme.version.Render("herdr ? ")
+		return m.theme.faint.Render("herdr ? ")
 	}
-	return m.theme.version.Render("herdr " + m.herdrVersion + " ")
+	return m.theme.faint.Render("herdr " + m.herdrVersion + " ")
 }
 
 // spread places left and right on one line of width, dropping right when
@@ -265,46 +265,48 @@ func spread(left, right string, width int) string {
 	return left + strings.Repeat(" ", gap) + right
 }
 
+// statusLine is what is going on: a message just set, marked done or failed,
+// work in progress with the spinner, or else a summary of the tab.
 func (m *model) statusLine() string {
 	t := m.theme
 	switch {
 	case m.busy != "":
-		return " " + m.spinner.View() + " " + m.busy + "…"
+		return " " + m.spinner.View() + " " + t.text.Render(m.busy+"…")
+	case m.status != "" && m.statusErr:
+		return " " + t.err.Render(glyphFailed+" "+m.status)
 	case m.status != "":
-		if m.statusErr {
-			return " " + t.err.Render(m.status)
-		}
-		return " " + t.ok.Render(m.status)
+		return " " + t.ok.Render(glyphDone) + " " + t.text.Render(m.status)
 	}
+	progress := func(text string) string { return " " + m.spinner.View() + " " + t.fg2.Render(text) }
 	if m.screen != screenList {
 		if m.spinning() {
-			return " " + m.spinner.View() + t.faint.Render(" Reading the manifest from GitHub…")
+			return progress("Reading the manifest from GitHub…")
 		}
 		return ""
 	}
 	if m.tab == tabInstalled {
 		switch {
 		case m.installedErr != nil:
-			return " " + t.err.Render(oneLine(m.installedErr.Error()))
+			return " " + t.err.Render(glyphFailed+" "+oneLine(m.installedErr.Error()))
 		case !m.loaded:
-			return " " + m.spinner.View() + t.faint.Render(" Loading plugins…")
+			return progress("Loading plugins…")
 		case m.checking:
-			return " " + m.spinner.View() + t.faint.Render(" Checking for updates…")
+			return progress("Checking for updates…")
 		}
 		switch n := len(m.available()); n {
 		case 0:
 			return " " + t.faint.Render("All GitHub plugins are up to date")
 		case 1:
-			return " " + t.warn.Render("1 update available") + t.faint.Render(m.keyHint(actUpdate, "to review"))
+			return " " + t.warn.Render(glyphUpdate+" 1 update") + t.faint.Render(m.keyHint(actUpdate, "to review"))
 		default:
-			return " " + t.warn.Render(fmt.Sprintf("%d updates available", n)) + t.faint.Render(m.keyHint(actUpdateAll, "updates all"))
+			return " " + t.warn.Render(fmt.Sprintf("%s %d updates", glyphUpdate, n)) + t.faint.Render(m.keyHint(actUpdateAll, "updates all"))
 		}
 	}
 	switch {
 	case m.indexLoading:
-		return " " + m.spinner.View() + t.faint.Render(" Loading the marketplace index…")
+		return progress("Loading the marketplace index…")
 	case m.indexErr != nil:
-		return " " + t.err.Render(oneLine(m.indexErr.Error()))
+		return " " + t.err.Render(glyphFailed+" "+oneLine(m.indexErr.Error()))
 	}
 	return " " + t.faint.Render("Index from "+m.indexStatus.FetchedAt.Format(time.DateTime)+" · listings are not reviewed by herdr")
 }
@@ -324,9 +326,9 @@ func (m *model) viewList() string {
 	}
 	right := t.faint.Render(count + " ")
 	f.SetWidth(max(m.w()-ansi.StringWidth(right)-6, 10))
-	left := " " + f.View()
+	left := indent + f.View()
 	if !f.Focused() && f.Value() == "" {
-		left = " " + t.faint.Render(f.Prompt+f.Placeholder)
+		left = indent + t.accent.Render(f.Prompt) + t.faint.Render(f.Placeholder)
 	}
 	filter := spread(left, right, m.w())
 
@@ -353,18 +355,26 @@ func plural(n int, noun string) string {
 	return fmt.Sprintf("%d %ss", n, noun)
 }
 
-// item renders one two-line list item and the gap below it. The selected
-// item is marked by a bar on its left, as in Bubbles' list.
+// item renders one two-line list item and the gap below it. Column 2 holds
+// the bar that marks the selected item; the item starts in column 4.
 func (m *model) item(title, desc string, selected bool) []string {
 	bar := "  "
 	if selected {
-		bar = m.theme.selBar.Render("│") + " "
+		bar = m.theme.selBar.Render(glyphSelected) + " "
 	}
 	return []string{" " + bar + title, " " + bar + desc, ""}
 }
 
 func (m *model) empty(text string) []string {
-	return []string{"", "   " + m.theme.faint.Render(text)}
+	return []string{"", indent + " " + m.theme.faint.Render(text)}
+}
+
+// itemStyles are the title and description styles of a list item.
+func (m *model) itemStyles(selected bool) (title, desc lipgloss.Style) {
+	if selected {
+		return m.theme.bold, m.theme.soft
+	}
+	return m.theme.text, m.theme.fg2
 }
 
 func (m *model) installedItems() []string {
@@ -385,39 +395,35 @@ func (m *model) installedItems() []string {
 	for i := start; i < end; i++ {
 		p := list[i]
 		selected := i == m.cursor[tabInstalled]
-		nameStyle, descStyle := t.itemTitle, t.itemDesc
-		if selected {
-			nameStyle, descStyle = t.selTitle, t.selDesc
-		}
-		title := m.highlight(p.Name, terms, nameStyle) + " " + t.version.Render(p.Version)
-		if badges := m.installedBadges(p); len(badges) > 0 {
-			title += " " + strings.Join(badges, " ")
-		}
+		nameStyle, descStyle := m.itemStyles(selected)
+		title := strings.Join(append([]string{m.highlight(p.Name, terms, nameStyle), t.faint.Render(p.Version)}, m.installedMarks(p)...), "  ")
 		desc := m.highlight(p.PluginID+" · "+manager.SourceLabel(p), terms, descStyle)
 		out = append(out, m.item(title, desc, selected)...)
 	}
 	return out
 }
 
-func (m *model) installedBadges(p herdr.InstalledPluginInfo) []string {
+// installedMarks are the states of an installed plugin worth a mark in the
+// list; enabled, the usual state, is left unmarked there.
+func (m *model) installedMarks(p herdr.InstalledPluginInfo) []string {
 	t := m.theme
 	var out []string
 	if !p.Enabled {
-		out = append(out, t.badgeDisabled.Render("disabled"))
+		out = append(out, mark(t.faint, glyphDisabled, "disabled"))
 	}
 	if _, github := source.FromInstalled(p); !github {
-		out = append(out, t.badgeLocal.Render("local"))
+		out = append(out, mark(t.fg2, glyphLocal, "local"))
 	}
 	if w := p.Warnings.ValueOrZero(); len(w) > 0 {
-		out = append(out, t.badgeWarn.Render(plural(len(w), "warning")))
+		out = append(out, mark(t.warn, glyphWarning, plural(len(w), "warning")))
 	}
 	ch, ok := m.checks[p.PluginID]
 	switch {
 	case !ok:
 	case ch.Err != nil:
-		out = append(out, t.badgeError.Render("check failed"))
+		out = append(out, mark(t.err, glyphFailed, "check failed"))
 	case ch.Result.Kind == updates.Available:
-		out = append(out, t.badgeUpdate.Render("update → "+updateTarget(ch.Result)))
+		out = append(out, mark(t.warn, glyphUpdate, updateTarget(ch.Result)))
 	case ch.Result.Kind == updates.Pinned:
 		out = append(out, t.faint.Render("pinned"))
 	}
@@ -435,9 +441,9 @@ func showsAll(text string, terms []string) bool {
 	return true
 }
 
-// highlight renders text in base with every occurrence of a term marked.
-// Text whose lower-case form changes length is drawn unmarked, since the
-// match positions would not line up.
+// highlight renders text in base with every occurrence of a term in the
+// accent. Text whose lower-case form changes length is drawn unmarked, since
+// the match positions would not line up.
 func (m *model) highlight(text string, terms []string, base lipgloss.Style) string {
 	lower := strings.ToLower(text)
 	if len(terms) == 0 || len(lower) != len(text) {
@@ -456,7 +462,7 @@ func (m *model) highlight(text string, terms []string, base lipgloss.Style) stri
 			i += j + len(term)
 		}
 	}
-	match := m.theme.match.Inherit(base)
+	match := m.theme.match
 	var out strings.Builder
 	for start := 0; start < len(text); {
 		end := start
@@ -473,7 +479,7 @@ func (m *model) highlight(text string, terms []string, base lipgloss.Style) stri
 	return out.String()
 }
 
-// updateTarget names what an update moves to in the space of a badge.
+// updateTarget names what an update moves to in the space of a mark.
 func updateTarget(r updates.Result) string {
 	if r.TargetRef != "" && r.TargetRef != r.CurrentRef {
 		return r.TargetRef
@@ -503,17 +509,14 @@ func (m *model) browseItems() []string {
 	for i := start; i < end; i++ {
 		e := entries[i]
 		selected := i == m.cursor[tabBrowse]
-		nameStyle, descStyle := t.itemTitle, t.itemDesc
-		if selected {
-			nameStyle, descStyle = t.selTitle, t.selDesc
-		}
+		nameStyle, descStyle := m.itemStyles(selected)
 		name := e.Manifest.Name
 		if name == "" {
 			name = e.Manifest.ID
 		}
-		title := m.highlight(name, terms, nameStyle) + " " + t.version.Render(e.Manifest.Version) + "  " + t.star.Render(fmt.Sprintf("★ %d", e.Repo.Stars))
+		title := m.highlight(name, terms, nameStyle) + "  " + t.faint.Render(fmt.Sprintf("%s  %s %d", e.Manifest.Version, glyphStar, e.Repo.Stars))
 		if installed[e.Manifest.ID] {
-			title += " " + t.badgeInstalled.Render("installed")
+			title += "  " + mark(t.ok, glyphDone, "installed")
 		}
 		// The description line shows where the terms matched: the source,
 		// the description that mentions them, and any matching topics.
@@ -551,93 +554,175 @@ func (m *model) viewDetail() string {
 // Info views as tabs.
 func (m *model) detailHeader(d *detail) []string {
 	t := m.theme
-	crumb := "  " + t.crumb.Render(d.crumb+" ›") + " " + t.crumbTitle.Render(d.title)
+	crumb := indent + t.faint.Render(d.crumb+" ›") + " " + t.bold.Render(d.title)
 	labels, underline := m.tabRow(d.views(), nil, int(d.view))
 	return []string{spread(crumb, m.versionLabel(), m.w()), "", labels, underline}
 }
 
-// detailLines renders the detail content wrapped to the width.
+// detailLines renders the Info view.
 func (m *model) detailLines(d *detail) []string {
-	var raw []string
 	switch {
 	case d.versions != nil:
 		return m.versionLines(d)
 	case d.plugin != nil:
-		raw = m.installedDetail(d)
+		return m.installedDetail(d)
 	case d.loading && d.entry != nil:
-		raw = m.sectionLines(m.entrySections(d.entry))
+		return m.entryLines(d.entry)
 	case d.loading:
+		return nil
 	case d.err != nil:
-		raw = []string{"   " + m.theme.err.Render(safe.Line(d.err.Error()))}
-	default:
-		raw = m.sectionLines(d.preview.Sections())
+		return wrapIndented(indent+m.theme.err.Render(glyphFailed+" "+safe.Line(d.err.Error())), m.w()-1)
 	}
-	var out []string
-	for _, line := range raw {
-		out = append(out, wrapIndented(line, m.w()-1)...)
-	}
-	return out
+	return m.previewLines(d.preview)
 }
 
 // wrapIndented wraps line to width, continuing wrapped lines at the line's
 // own indentation.
 func wrapIndented(line string, width int) []string {
 	body := strings.TrimLeft(line, " ")
-	indent := line[:len(line)-len(body)]
-	wrapped := strings.Split(ansi.Wrap(body, max(width-len(indent), 10), ""), "\n")
+	pad := line[:len(line)-len(body)]
+	wrapped := strings.Split(ansi.Wrap(body, max(width-len(pad), 10), ""), "\n")
 	for i := range wrapped {
-		wrapped[i] = indent + wrapped[i]
+		wrapped[i] = pad + wrapped[i]
 	}
 	return wrapped
 }
 
-// entrySections is what the marketplace index says about a plugin, shown
-// until the preview has read the manifest at the commit it would install.
-func (m *model) entrySections(e *market.Entry) []manager.Section {
-	mf := e.Manifest
-	platforms := "undeclared"
-	if len(mf.Platforms) > 0 {
-		platforms = strings.Join(mf.Platforms, ", ")
+// runsOn is the platforms and herdr version a plugin needs, checked when
+// nothing stands in the way.
+func (m *model) runsOn(platforms []string, minHerdr string, fits bool) string {
+	t := m.theme
+	value := "any platform"
+	if len(platforms) > 0 {
+		value = strings.Join(platforms, ", ")
 	}
-	summary := []string{
-		fmt.Sprintf("%s %s (%s)", mf.Name, mf.Version, mf.ID),
-		"source: " + e.Source.String(),
-		"link: " + e.Source.WebURL(),
+	if minHerdr != "" {
+		value += t.faint.Render(" · herdr ≥ " + minHerdr)
 	}
-	if mf.Description != "" {
-		summary = append(summary, mf.Description)
+	if fits {
+		value += " " + t.ok.Render(glyphDone)
 	}
-	summary = append(summary, "platforms: "+platforms, "min herdr: "+mf.MinHerdrVersion)
-	out := []manager.Section{{Title: "Plugin", Lines: summary}}
-	if problems := compat.Problems(mf.Platforms, mf.MinHerdrVersion, m.herdrVersion, compat.Platform()); len(problems) > 0 {
-		out = append(out, manager.Section{Title: "Problems", Lines: problems})
+	return value
+}
+
+// problems are reasons a plugin cannot be installed here.
+func (m *model) problems(list []string) []string {
+	if len(list) == 0 {
+		return nil
+	}
+	t := m.theme
+	out := []string{"", m.heading("Problems", "cannot be installed here", t.err)}
+	for _, p := range list {
+		out = append(out, wrapIndented(subIndent+t.err.Render(glyphFailed+" "+safe.Line(p)), m.w()-1)...)
 	}
 	return out
 }
 
-// sectionLines draws sections: a heading, then its lines in the style their
-// content calls for. Everything but the summary sections is commands.
-func (m *model) sectionLines(sections []manager.Section) []string {
+// entryLines is what the marketplace index says about a plugin, shown until
+// the preview has read the manifest at the commit it would install.
+func (m *model) entryLines(e *market.Entry) []string {
 	t := m.theme
-	var out []string
-	for i, s := range sections {
-		if i > 0 {
-			out = append(out, "")
+	mf := e.Manifest
+	problems := compat.Problems(mf.Platforms, mf.MinHerdrVersion, m.herdrVersion, compat.Platform())
+	out := []string{m.titleLine(mf.Name, mf.Version, mf.ID)}
+	if mf.Description != "" {
+		out = append(out, wrapIndented(indent+t.fg2.Render(mf.Description), m.w()-1)...)
+	}
+	out = append(out, "")
+	out = append(out, m.fields([]field{
+		{"source", t.text.Render(e.Source.String())},
+		{"link", t.fg2.Render(e.Source.WebURL())},
+		{"runs on", m.runsOn(mf.Platforms, mf.MinHerdrVersion, len(problems) == 0)},
+	})...)
+	out = append(out, m.problems(problems)...)
+	return append(out, "", indent+t.faint.Render("Reading what it runs from the manifest…"))
+}
+
+// previewLines lay out an install or update preview: what the plugin is,
+// where it comes from, then what it runs.
+func (m *model) previewLines(p *manager.Preview) []string {
+	t := m.theme
+	mf := p.Manifest
+	out := []string{m.titleLine(safe.Line(mf.Name), safe.Line(mf.Version), safe.Line(mf.ID))}
+	if mf.Description != "" {
+		out = append(out, wrapIndented(indent+t.fg2.Render(safe.Line(mf.Description)), m.w()-1)...)
+	}
+	out = append(out, "")
+
+	ref := p.Ref
+	if ref == "" {
+		ref = "default branch"
+		if p.DefaultBranch != "" {
+			ref += " (" + p.DefaultBranch + ")"
 		}
-		heading, body := t.heading, t.itemTitle
-		switch s.Title {
-		case "Problems":
-			heading, body = t.err.Bold(true), t.err
-		case "Warnings", "Manifest warnings":
-			heading, body = t.warn.Bold(true), t.warn
-		case "Plugin", "Update":
-		default:
-			body = t.code
+	}
+	commit := p.Commit
+	if len(commit) > 7 {
+		commit = commit[:7]
+	}
+	platforms := make([]string, len(mf.Platforms))
+	for i, pl := range mf.Platforms {
+		platforms[i] = string(pl)
+	}
+	rows := []field{
+		{"source", t.text.Render(p.Source.String()) + t.faint.Render(" @ ") + t.text.Render(ref) + " " + t.faint.Render(commit)},
+		{"link", t.fg2.Render(p.Source.WebURL())},
+		{"runs on", m.runsOn(platforms, safe.Line(mf.MinHerdrVersion), len(p.Problems) == 0)},
+	}
+	if len(p.Releases) > 0 {
+		rows = append(rows, field{"releases", m.releasesValue(p.Releases)})
+	}
+	if p.Existing != nil {
+		rows = append(rows, field{"replaces", t.text.Render(p.Existing.Version) + t.faint.Render(" from "+manager.SourceLabel(*p.Existing))})
+	}
+	out = append(out, m.fields(rows)...)
+	out = append(out, m.problems(p.Problems)...)
+	if len(p.Warnings) > 0 {
+		out = append(out, "")
+		out = append(out, m.section("Manifest warnings", "", t.warn, t.warn, printableAll(p.Warnings))...)
+	}
+	entries, hidden := p.Entrypoints()
+	out = append(out, m.sections(entries)...)
+	if hidden > 0 {
+		out = append(out, "", indent+t.faint.Render(plural(hidden, "entry")+" for other platforms not shown"))
+	}
+	return out
+}
+
+// releasesValue lists the newest releases, the one install picks by default
+// marked latest.
+func (m *model) releasesValue(releases []string) string {
+	t := m.theme
+	const shown = 3
+	parts := make([]string, 0, shown+1)
+	for i, tag := range releases {
+		if i == shown {
+			parts = append(parts, t.faint.Render(fmt.Sprintf("+%d", len(releases)-shown)))
+			break
 		}
-		out = append(out, "  "+heading.Render(s.Title))
-		for _, line := range s.Lines {
-			out = append(out, "    "+body.Render(line))
+		part := t.text.Render(tag)
+		if tag == latestRelease(releases) {
+			part += " " + t.ok.Render("latest")
 		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, t.faint.Render(" · "))
+}
+
+// latestRelease is the newest release that is not a pre-release.
+func latestRelease(releases []string) string {
+	for _, tag := range releases {
+		if !updates.IsPrerelease(tag) {
+			return tag
+		}
+	}
+	return ""
+}
+
+func printableAll(lines []string) []string {
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = safe.Line(l)
 	}
 	return out
 }
@@ -645,37 +730,40 @@ func (m *model) sectionLines(sections []manager.Section) []string {
 func (m *model) installedDetail(d *detail) []string {
 	t := m.theme
 	p := *d.plugin
-	state := t.badgeEnabled.Render("enabled")
+	state := mark(t.ok, glyphEnabled, "enabled")
 	if !p.Enabled {
-		state = t.badgeDisabled.Render("disabled")
+		state = mark(t.faint, glyphDisabled, "disabled")
 	}
-	out := []string{"  " + t.selTitle.Render(p.Name) + " " + t.version.Render(p.Version) + "  " + state}
+	out := []string{m.titleLine(p.Name, p.Version, p.PluginID, state)}
 	if desc := p.Description.ValueOrZero(); desc != "" {
-		out = append(out, "  "+t.itemDesc.Render(desc))
+		out = append(out, wrapIndented(indent+t.fg2.Render(desc), m.w()-1)...)
 	}
 	out = append(out, "")
 
-	info := []string{"id: " + p.PluginID, "source: " + manager.SourceLabel(p), "root: " + p.PluginRoot}
+	rows := []field{{"source", t.text.Render(manager.SourceLabel(p))}}
 	if src, ok := p.Source.Get(); ok && src.ResolvedCommit.ValueOrZero() != "" {
-		info = append(info, "commit: "+src.ResolvedCommit.ValueOrZero())
+		rows = append(rows, field{"commit", t.fg2.Render(src.ResolvedCommit.ValueOrZero())})
 	}
+	rows = append(rows, field{"root", t.fg2.Render(p.PluginRoot)})
 	if v := p.MinHerdrVersion.ValueOrZero(); v != "" {
-		info = append(info, "min herdr: "+v)
+		rows = append(rows, field{"needs", t.text.Render("herdr ≥ " + v)})
 	}
-	sections := []manager.Section{{Title: "Plugin", Lines: info}}
-
 	if ch, ok := m.checks[p.PluginID]; ok {
-		line := ch.Result.Describe()
+		var value string
 		switch {
 		case ch.Err != nil:
-			line = t.err.Render(safe.Line(ch.Err.Error()))
+			value = t.err.Render(glyphFailed + " " + safe.Line(ch.Err.Error()))
 		case ch.Result.Kind == updates.Available:
-			line = t.warn.Render(line) + t.faint.Render(m.keyHint(actUpdate, "to review the update"))
+			value = t.warn.Render(glyphUpdate+" "+ch.Result.Describe()) + t.faint.Render(m.keyHint(actUpdate, "to review"))
+		default:
+			value = t.fg2.Render(ch.Result.Describe())
 		}
-		sections = append(sections, manager.Section{Title: "Update", Lines: []string{line}})
+		rows = append(rows, field{"update", value})
 	}
+	out = append(out, m.fields(rows)...)
 	if w := p.Warnings.ValueOrZero(); len(w) > 0 {
-		sections = append(sections, manager.Section{Title: "Warnings", Lines: w})
+		out = append(out, "")
+		out = append(out, m.section("Warnings", "", t.warn, t.warn, w)...)
 	}
 
 	var entry []string
@@ -692,28 +780,33 @@ func (m *model) installedDetail(d *detail) []string {
 		entry = append(entry, "startup: "+manager.Command(s.Command))
 	}
 	if len(entry) > 0 {
-		sections = append(sections, manager.Section{Title: "Entrypoints", Lines: entry})
+		out = append(out, "")
+		out = append(out, m.section("Entrypoints", "", t.faint, t.text, entry)...)
 	}
-	out = append(out, m.sectionLines(sections)...)
+	return append(out, m.logLines(d)...)
+}
 
-	out = append(out, "", "  "+t.heading.Render("Recent command logs"))
+// logLines are the commands herdr ran for the plugin, the newest first.
+func (m *model) logLines(d *detail) []string {
+	t := m.theme
+	out := []string{"", m.heading("Recent command logs", "", t.faint)}
 	switch {
 	case d.logsErr != nil:
-		out = append(out, "    "+t.err.Render(safe.Line(d.logsErr.Error())))
+		return append(out, subIndent+t.err.Render(glyphFailed+" "+safe.Line(d.logsErr.Error())))
 	case d.logs == nil:
-		out = append(out, "    "+t.faint.Render("loading…"))
+		return append(out, subIndent+t.faint.Render("loading…"))
 	case len(d.logs) == 0:
-		out = append(out, "    "+t.faint.Render("none"))
+		return append(out, subIndent+t.faint.Render("none"))
 	}
 	for _, l := range d.logs {
-		style := t.code
+		glyph, style := t.ok.Render(glyphDone), t.text
 		if l.Status == herdr.PluginCommandStatusFailed {
-			style = t.err
+			glyph, style = t.err.Render(glyphFailed), t.err
 		}
-		out = append(out, "    "+style.Render(manager.LogHeader(l)))
+		out = append(out, subIndent+glyph+" "+style.Render(manager.LogHeader(l)))
 		if text := strings.TrimSpace(l.Stderr.ValueOrZero()); text != "" {
 			for line := range strings.SplitSeq(text, "\n") {
-				out = append(out, "      "+t.faint.Render(line))
+				out = append(out, subIndent+"  "+t.faint.Render(line))
 			}
 		}
 	}
@@ -733,11 +826,11 @@ func (m *model) viewOutput() string {
 	}
 	var lines []string
 	for line := range strings.SplitSeq(text, "\n") {
-		lines = append(lines, wrapIndented("   "+t.code.Render(line), m.w()-1)...)
+		lines = append(lines, wrapIndented(indent+" "+t.text.Render(line), m.w()-1)...)
 	}
 	if m.output.err != nil {
 		for line := range strings.SplitSeq(safe.Text(m.output.err.Error()), "\n") {
-			lines = append(lines, wrapIndented("   "+t.err.Render(line), m.w()-1)...)
+			lines = append(lines, wrapIndented(indent+" "+t.err.Render(line), m.w()-1)...)
 		}
 	}
 	m.outputOffset = min(m.outputOffset, max(len(lines)-m.bodyHeight(), 0))
