@@ -14,7 +14,7 @@ type helpKeys struct {
 	up, down, page, ends, scroll, back, quit, more, less, filter, search, output,
 	details, toggle, update, all, check, remove, reload, logs, refresh, sort, install,
 	apply, browse, instTab, open, keep, clear, move, yes, no, cont, home, info, readme,
-	version, choose, cancel, notes, step key.Binding
+	version, choose, cancel, notes, step, preview key.Binding
 }
 
 func newHelpKeys(km keymap) helpKeys {
@@ -59,7 +59,7 @@ func newHelpKeys(km keymap) helpKeys {
 		scroll: pair(actUp, actDown, "scroll"), back: first(actBack, "back"), quit: first(actQuit, "quit"),
 		more: first(actHelp, "more"), less: first(actHelp, "less"),
 		filter: first(actSearch, "filter"), search: first(actSearch, "search"), output: first(actOutput, "last output"),
-		details: first(actOpen, "details"), toggle: first(actToggle, "enable/disable"),
+		details: first(actOpen, "details"), preview: first(actOpen, "preview"), toggle: first(actToggle, "enable/disable"),
 		update: first(actUpdate, "update"), all: first(actUpdateAll, "update all"), check: first(actCheck, "check updates"),
 		remove: first(actUninstall, "uninstall"), reload: first(actReload, "reload"), logs: first(actReload, "reload logs"),
 		refresh: first(actReload, "refresh index"), sort: first(actSort, "sort"), install: first(actInstall, "install"),
@@ -136,10 +136,10 @@ func (m *model) keyMap() keyMap {
 		}
 	}
 	return keyMap{
-		short: []key.Binding{h.install, h.details, h.instTab, h.search, h.sort, h.quit, m.moreKey()},
+		short: []key.Binding{h.preview, h.instTab, h.search, h.sort, h.quit, m.moreKey()},
 		full: [][]key.Binding{
 			nav,
-			{h.install, h.details, h.sort, h.refresh, h.home},
+			{h.preview, h.sort, h.refresh, h.home},
 			{h.search, h.output, h.instTab, h.less, h.quit},
 		},
 	}

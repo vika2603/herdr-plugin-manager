@@ -857,6 +857,22 @@ func (*rateLimited) Releases(context.Context, source.GitHub) ([]market.Release, 
 	return nil, fmt.Errorf("read the releases: %w", market.ErrRateLimited)
 }
 
+func TestNoListKeyInstalls(t *testing.T) {
+	b := newFake()
+	h := start(t, b)
+	h.press("tab", "i", "i")
+	if got := b.Calls(); len(got) != 0 || h.m.screen != screenList {
+		t.Fatalf("i in the marketplace list: screen %v, calls %q; want nothing", h.m.screen, got)
+	}
+	if words := h.words(); !strings.Contains(words, "enter preview") {
+		t.Errorf("the list's main key should be enter preview:\n%s", h.screen())
+	}
+	h.press("enter", "i")
+	if got := b.Calls(); len(got) != 2 || !strings.HasPrefix(got[1], "install") {
+		t.Errorf("i in the preview should install: %q", got)
+	}
+}
+
 func TestEnterInAPreviewDoesNotInstall(t *testing.T) {
 	b := newFake()
 	h := start(t, b)

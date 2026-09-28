@@ -367,8 +367,7 @@ func (m *model) browseAction(a action) (tea.Model, tea.Cmd) {
 		m.sortEntries()
 		m.cursor[tabBrowse], m.offset[tabBrowse] = 0, 0
 		return m, nil
-	case actOpen, actInstall:
-		// Installing starts from the preview, like opening does.
+	case actOpen:
 		entries := m.visibleEntries()
 		if c := m.cursor[tabBrowse]; c < len(entries) {
 			return m, m.openInstall(entries[c])
