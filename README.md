@@ -145,12 +145,12 @@ components.
 | `hpm export [-o file]` | write the installed plugins to a file |
 | `hpm import <file> [id...]` | preview, then install the plugins of an export as exported; `--exclude` and `--dry-run` as for update |
 
-`hpm export` writes every installed plugin as JSON: its source, the ref it
-follows, the commit installed and whether it is enabled. `hpm import` reads
-that file on another machine and first lists what each plugin needs there:
+`hpm export` writes every installed plugin except locally linked ones as
+JSON: its source, the ref it follows, the commit installed and whether it is
+enabled. `hpm import` reads that file on another machine and first lists what
+each plugin needs there:
 an install, a change from what is installed, only enabling or disabling it,
 or nothing. It also lists which plugins cannot be imported and why: a
-locally linked plugin, which only `herdr plugin link` can bring back; a
 source hpm cannot install; the same id installed here from another source
 or linked locally; a manifest at the exported commit that cannot be read or
 cannot run here. Each install is then shown in full, and nothing runs until

@@ -95,8 +95,8 @@ func TestExportRecordsWhatEachPluginFollows(t *testing.T) {
 	if p := byID["o.off"]; p.Ref != "main" || p.Tracking != TrackRef || p.IsEnabled() {
 		t.Errorf("o.off = %+v", p)
 	}
-	if p := byID["me.dev"]; p.Kind != ExportLocal || p.Root != "/src/dev" || p.Source != "" {
-		t.Errorf("me.dev = %+v", p)
+	if _, ok := byID["me.dev"]; ok || !slices.Equal(exp.Local, []string{"me.dev"}) {
+		t.Errorf("the local link is not skipped: %+v, local %v", byID["me.dev"], exp.Local)
 	}
 
 	var buf bytes.Buffer
@@ -107,7 +107,7 @@ func TestExportRecordsWhatEachPluginFollows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(back.Plugins) != 3 || back.Plugins[1].Ref != exp.Plugins[1].Ref || !back.ExportedAt.Equal(exp.ExportedAt) {
+	if len(back.Plugins) != 2 || back.Plugins[1].Ref != exp.Plugins[1].Ref || !back.ExportedAt.Equal(exp.ExportedAt) {
 		t.Errorf("read back = %+v", back)
 	}
 }

@@ -30,7 +30,7 @@ func TestExportThenRestoreElsewhere(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stderr, "Exported 2 plugins to "+file) || !strings.Contains(stderr, "cannot install: me.dev") {
+	if !strings.Contains(stderr, "Exported 1 plugin to "+file) || !strings.Contains(stderr, "Skipped, linked locally: me.dev") {
 		t.Errorf("export summary:\n%s", stderr)
 	}
 
@@ -43,8 +43,7 @@ func TestExportThenRestoreElsewhere(t *testing.T) {
 	}
 	for _, want := range []string{
 		"carol.gadget  install 0.2.0 at default branch (bbbbbbbbbbbb), enabled; follows the default branch",
-		"me.dev        cannot import: linked locally from /src/dev where it was exported",
-		"1 to change, 1 cannot be imported.",
+		"1 to change.",
 		"== carol.gadget (install)", "Build commands",
 	} {
 		if !strings.Contains(out, want) {
@@ -52,7 +51,7 @@ func TestExportThenRestoreElsewhere(t *testing.T) {
 		}
 	}
 	out, _, err = to.run("", false, "import", file, "--dry-run")
-	if err == nil || err.Error() != "not imported: me.dev" || !strings.Contains(out, "Dry run: nothing was changed.") {
+	if err != nil || strings.Contains(out, "me.dev") || !strings.Contains(out, "Dry run: nothing was changed.") {
 		t.Errorf("dry run: %v\n%s", err, out)
 	}
 	if to.ran("plugin install") {
@@ -60,14 +59,13 @@ func TestExportThenRestoreElsewhere(t *testing.T) {
 	}
 
 	out, _, err = to.run("", false, "import", file, "--yes")
-	if err == nil || err.Error() != "not imported: me.dev" {
-		t.Errorf("err = %v, want the link reported", err)
+	if err != nil {
+		t.Errorf("err = %v", err)
 	}
 	if !to.ran("plugin install carol/gadget --ref " + head + " --yes") {
 		t.Errorf("herdr was not asked for the exported commit: %q", to.calls())
 	}
-	if !strings.Contains(out, "carol.gadget  imported      carol.gadget is installed: 0.2.0 at default branch (bbbbbbbbbbbb), enabled") ||
-		!strings.Contains(out, "me.dev        not imported  cannot import: linked locally") {
+	if !strings.Contains(out, "carol.gadget  imported  carol.gadget is installed: 0.2.0 at default branch (bbbbbbbbbbbb), enabled") {
 		t.Errorf("the results do not say how each plugin ended:\n%s", out)
 	}
 	if out, _, _ := to.run("", false, "info", "carol.gadget"); !strings.Contains(out, "updates: follows the default branch") {
@@ -77,10 +75,26 @@ func TestExportThenRestoreElsewhere(t *testing.T) {
 		t.Errorf("the restore is not in the history:\n%s", out)
 	}
 
-	out, _, err = to.run("", false, "import", file, "--yes", "--exclude", "me.dev")
-	if err != nil || !strings.Contains(out, "unchanged: already installed as exported") || !strings.Contains(out, "Nothing to import.") ||
-		!strings.Contains(out, "Left out: me.dev") {
+	out, _, err = to.run("", false, "import", file, "--yes")
+	if err != nil || !strings.Contains(out, "unchanged: already installed as exported") || !strings.Contains(out, "Nothing to import.") {
 		t.Errorf("restoring again: %v\n%s", err, out)
+	}
+
+	// With only a local link, stdout still carries an export import reads.
+	only := newHarness(t)
+	only.setInstalled(`{"result":{"type":"plugin_list","plugins":[` +
+		`{"plugin_id":"me.dev","name":"Dev","version":"0.0.1","enabled":true,"manifest_path":"/src/dev/herdr-plugin.toml","plugin_root":"/src/dev",` +
+		`"source":{"kind":"local"}}]}}`)
+	stdout, stderr, err := only.run("", false, "export")
+	if err != nil || !strings.Contains(stdout, `"plugins": []`) || !strings.Contains(stderr, "Exported 0 plugins to stdout") {
+		t.Fatalf("export of a local link only: %v\n%s\n%s", err, stdout, stderr)
+	}
+	empty := filepath.Join(t.TempDir(), "empty.json")
+	if err := os.WriteFile(empty, []byte(stdout), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, _, err := to.run("", false, "import", empty, "--yes"); err != nil || !strings.Contains(out, "Nothing to import.") {
+		t.Errorf("import of the empty export: %v\n%s", err, out)
 	}
 }
 

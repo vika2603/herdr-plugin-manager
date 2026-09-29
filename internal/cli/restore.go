@@ -22,7 +22,8 @@ func (c *cli) exportCmd() *cobra.Command {
 		Use:   "export",
 		Short: "Save the installed plugins to a file for import",
 		Long: "Write the installed plugins as JSON: source, followed ref, installed commit\n" +
-			"and enabled state. Local links are listed but cannot be imported.",
+			"and enabled state. Locally linked plugins are skipped, since import cannot\n" +
+			"install them.",
 		Example: "  hpm export -o plugins.json\n" +
 			"  hpm import plugins.json",
 		Args: cobra.NoArgs,
@@ -65,26 +66,22 @@ func writeExportFile(path string, exp *manager.Export) error {
 	return nil
 }
 
-// exportSummary tells on stderr what was exported and what restore cannot
-// install.
+// exportSummary tells on stderr what was exported and what was skipped or
+// cannot be imported.
 func (c *cli) exportSummary(exp *manager.Export, output string) {
 	where := "stdout"
 	if output != "" && output != "-" {
 		where = output
 	}
 	fmt.Fprintf(c.errOut, "Exported %s to %s.\n", plural(len(exp.Plugins), "plugin"), where)
-	var local, other []string
+	if len(exp.Local) > 0 {
+		fmt.Fprintf(c.errOut, "Skipped, linked locally: %s\n", strings.Join(exp.Local, ", "))
+	}
+	var other []string
 	for _, p := range exp.Plugins {
-		switch p.Kind {
-		case manager.ExportGitHub:
-		case manager.ExportLocal:
-			local = append(local, p.ID)
-		default:
+		if p.Kind != manager.ExportGitHub {
 			other = append(other, p.ID)
 		}
-	}
-	if len(local) > 0 {
-		fmt.Fprintf(c.errOut, "Linked locally, which import lists but cannot install: %s\n", strings.Join(local, ", "))
 	}
 	if len(other) > 0 {
 		fmt.Fprintf(c.errOut, "From a source import cannot install: %s\n", strings.Join(other, ", "))

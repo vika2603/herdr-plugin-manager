@@ -41,6 +41,9 @@ type Export struct {
 	ExportedAt   time.Time        `json:"exported_at"`
 	HerdrVersion string           `json:"herdr_version,omitempty"`
 	Plugins      []ExportedPlugin `json:"plugins"`
+	// Local names the locally linked plugins Export left out, since import
+	// cannot install them.
+	Local []string `json:"-"`
 }
 
 // ExportedPlugin is one installed plugin as exported.
@@ -75,7 +78,8 @@ func (p ExportedPlugin) state() State {
 	return State{Version: p.Version, Source: p.Source, Root: p.Root, Ref: p.Ref, Commit: p.Commit, Enabled: p.IsEnabled()}
 }
 
-// Export lists the installed plugins with the ref each follows. The refs
+// Export lists the installed plugins with the ref each follows, less the
+// locally linked ones. The refs
 // this manager keeps for the plugins it pinned must be readable: without
 // them such a plugin would be exported as a commit pin.
 func (m *Manager) Export(ctx context.Context) (*Export, error) {
@@ -88,7 +92,12 @@ func (m *Manager) Export(ctx context.Context) (*Export, error) {
 		HerdrVersion: m.HerdrVersion(ctx), Plugins: make([]ExportedPlugin, 0, len(plugins)),
 	}
 	for _, p := range plugins {
-		exp.Plugins = append(exp.Plugins, exportedOf(p))
+		e := exportedOf(p)
+		if e.Kind == ExportLocal {
+			exp.Local = append(exp.Local, e.ID)
+			continue
+		}
+		exp.Plugins = append(exp.Plugins, e)
 	}
 	return exp, nil
 }
