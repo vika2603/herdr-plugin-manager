@@ -81,7 +81,7 @@ func (c *cli) root(tui TUI) *cobra.Command {
 		c.listCmd(), c.searchCmd(), c.infoCmd(), c.installCmd(), c.uninstallCmd(),
 		c.enableCmd(true), c.enableCmd(false), c.outdatedCmd(), c.updateCmd(), c.rollbackCmd(), c.historyCmd(),
 		c.versionCmd(manager.KindSwitch), c.versionCmd(manager.KindPin), c.versionCmd(manager.KindUnpin), c.versionCmd(manager.KindReinstall),
-		c.logsCmd(), c.keysCmd(), c.doctorCmd(),
+		c.logsCmd(), c.keysCmd(), c.doctorCmd(), c.exportCmd(), c.restoreCmd(),
 	)
 	return root
 }
@@ -811,9 +811,10 @@ func (c *cli) rollbackCmd() *cobra.Command {
 		Short: "Undo the last change this manager made to a plugin",
 		Long: "Take a plugin back to where it was before the last install, update or other\n" +
 			"change recorded in the history, enabled or disabled as it was. An install is\n" +
-			"undone by uninstalling. The earlier commit is reinstalled, so its manifest is\n" +
-			"shown first, and the plugin follows the ref it followed then. A plugin changed\n" +
-			"outside this manager is left alone.",
+			"undone by uninstalling, and a change that only enabled or disabled the plugin\n" +
+			"by changing that back. Otherwise the earlier commit is reinstalled, so its\n" +
+			"manifest is shown first, and the plugin follows the ref it followed then. A\n" +
+			"plugin changed outside this manager is left alone.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -823,9 +824,15 @@ func (c *cli) rollbackCmd() *cobra.Command {
 			}
 			fmt.Fprintln(c.out, "To "+u.Describe()+".")
 			question := "Roll back " + args[0] + "?"
-			if u.Remove {
+			switch {
+			case u.Remove:
 				question = "Uninstall " + args[0] + "?"
-			} else {
+			case u.EnabledOnly:
+				question = "Disable " + args[0] + " again?"
+				if u.Entry.Before.Enabled {
+					question = "Enable " + args[0] + " again?"
+				}
+			default:
 				preview, err := c.m.PreviewAt(ctx, u.Target.Source, u.Target.Ref, u.Target.Commit, c.m.HerdrVersion(ctx), nil)
 				if err != nil {
 					return err

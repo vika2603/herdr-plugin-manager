@@ -129,6 +129,11 @@ type Change struct {
 	// in when that fails.
 	Current *herdr.InstalledPluginInfo
 	Target  Target
+	// Expect, when set, refuses the change when the plugin's record no
+	// longer matches Current, or is not installed when Current is nil: a
+	// change planned against one state must not run over another, such as
+	// an install from another source made in the meantime.
+	Expect bool
 }
 
 // Outcome is what a change did. Before and After are the plugin's states
@@ -207,6 +212,10 @@ var ErrKeepDisabled = errors.New("keeping the plugin disabled needs a running he
 // could not be read back, so what is installed is not known.
 var ErrUnconfirmed = errors.New("herdr reported success, but the plugin list could not be read afterwards, so the change is not confirmed")
 
+// ErrChanged is returned for a change refused because the plugin is no
+// longer as it was when the change was planned.
+var ErrChanged = errors.New("the plugin changed after the change was planned; review it again")
+
 // ErrCancelled is returned for a change stopped before it finished. herdr
 // is interrupted, and the outcome says where the plugin stands.
 var ErrCancelled = errors.New("cancelled")
@@ -241,8 +250,13 @@ func (m *Manager) Apply(ctx context.Context, c Change, out io.Writer) Outcome {
 		out = io.Discard
 	}
 	o := Outcome{Kind: c.Kind, ID: c.ID}
-	current, err := m.find(ctx, c.ID)
-	if err != nil {
+	var current *herdr.InstalledPluginInfo
+	var stale error
+	if c.Expect {
+		current, stale = m.readPlanned(ctx, c.ID, c.Current)
+	} else if found, err := m.find(ctx, c.ID); err == nil {
+		current = found
+	} else {
 		current = c.Current
 	}
 	if current != nil {
@@ -284,6 +298,9 @@ func (m *Manager) Apply(ctx context.Context, c Change, out io.Writer) Outcome {
 		return done()
 	}
 
+	if stale != nil {
+		return refuse(stale)
+	}
 	if !want {
 		if err := m.ping(ctx); err != nil {
 			return refuse(fmt.Errorf("%w: %w", ErrKeepDisabled, err))
@@ -409,6 +426,13 @@ func (m *Manager) setEnabledWithin(ctx context.Context, id string, enabled bool)
 	return m.SetEnabled(ctx, id, enabled)
 }
 
+func enableVerb(enabled bool) string {
+	if enabled {
+		return "enable"
+	}
+	return "disable"
+}
+
 func enabledWord(enabled bool) string {
 	if enabled {
 		return "enabled"
@@ -428,6 +452,65 @@ func (m *Manager) find(ctx context.Context, id string) (*herdr.InstalledPluginIn
 		}
 	}
 	return nil, nil //nolint:nilnil // No record: the plugin is not installed.
+}
+
+// findFollowed is find for a check against a planned state: it fails when
+// the refs this manager keeps cannot be read, rather than report a plugin
+// it pinned as herdr records it.
+func (m *Manager) findFollowed(ctx context.Context, id string) (*herdr.InstalledPluginInfo, error) {
+	plugins, err := m.installedFollowed(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range plugins {
+		if plugins[i].PluginID == id {
+			return &plugins[i], nil
+		}
+	}
+	return nil, nil //nolint:nilnil // No record: the plugin is not installed.
+}
+
+// readPlanned reads plugin id's record for a change planned against
+// expect. stale is why the change must not run: the plugin is no longer as
+// planned, its record cannot be read, or ctx ended first. current is expect
+// when the record cannot be read.
+func (m *Manager) readPlanned(ctx context.Context, id string, expect *herdr.InstalledPluginInfo) (current *herdr.InstalledPluginInfo, stale error) {
+	current, err := m.findFollowed(ctx, id)
+	switch {
+	case err != nil && ctx.Err() != nil:
+		return expect, fmt.Errorf("%w before it started: %w", ErrCancelled, err)
+	case err != nil:
+		return expect, changedSince(id, expect, nil, err)
+	}
+	return current, changedSince(id, expect, current, nil)
+}
+
+// changedSince is nil when plugin id's record now, read with readErr, is
+// the planned one: the same revision and enabled state, or not installed
+// either time. Otherwise it is an ErrChanged saying what changed.
+func changedSince(id string, planned, now *herdr.InstalledPluginInfo, readErr error) error {
+	label := func(p *herdr.InstalledPluginInfo) string {
+		if p == nil {
+			return "not installed"
+		}
+		s := StateOf(*p)
+		if s.Source != "" {
+			return s.Source + " " + s.String()
+		}
+		return s.String()
+	}
+	switch {
+	case readErr != nil:
+		return fmt.Errorf("%w: the plugin list could not be read to check %s: %w", ErrChanged, id, readErr)
+	case planned == nil && now == nil:
+		return nil
+	case planned != nil && now != nil:
+		a, b := StateOf(*planned), StateOf(*now)
+		if a.SameRevision(b) && a.Enabled == b.Enabled {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: %s was %s when planned, and is %s now", ErrChanged, id, label(planned), label(now))
 }
 
 // Find returns the record of plugin id, nil when it is not installed.
@@ -533,6 +616,79 @@ func (m *Manager) uninstall(ctx context.Context, kind ChangeKind, id string, out
 	return o
 }
 
+// setEnabled enables or disables plugin id as a recorded change of kind,
+// without reinstalling it. expect is the record the change was planned
+// against; the change is refused when the plugin no longer matches it. The
+// history keeps the states around the change, so a rollback changes the
+// enabled state back.
+func (m *Manager) setEnabled(ctx context.Context, kind ChangeKind, id string, enabled bool, expect *herdr.InstalledPluginInfo, out io.Writer) Outcome {
+	if out == nil {
+		out = io.Discard
+	}
+	o := Outcome{Kind: kind, ID: id}
+	current, stale := m.readPlanned(ctx, id, expect)
+	if current != nil {
+		s := StateOf(*current)
+		o.Before = &s
+	}
+	entry := Entry{Kind: kind, Plugin: id, Before: o.Before}
+	logFile, logPath := m.openLog(&entry)
+	if logFile != nil {
+		defer func() { _ = logFile.Close() }()
+		out = io.MultiWriter(out, logFile)
+		o.Log = logPath
+	}
+	switch {
+	case stale != nil:
+		o.After, o.Err = o.Before, stale
+	case current == nil:
+		o.Err = fmt.Errorf("%s is not installed", id)
+	default:
+		o.Err = m.setEnabledAndRead(ctx, &o, enabled)
+		if o.Err == nil {
+			fmt.Fprintf(out, "%s %s\n", enabledWord(enabled), id)
+		}
+	}
+	entry.After, entry.AfterUnknown = o.After, o.AfterUnknown
+	if o.Err != nil {
+		entry.Error, entry.Cancelled = o.Err.Error(), errors.Is(o.Err, ErrCancelled)
+		if logFile != nil {
+			fmt.Fprintf(logFile, "\n%s\n", o.Error())
+		}
+	}
+	if err := m.History.add(&entry); err != nil {
+		fmt.Fprintf(out, "warning: could not record the change in the history: %v\n", err)
+	} else if m.History != nil && m.History.Dir != "" {
+		o.Entry = entry.ID
+	}
+	return o
+}
+
+// setEnabledAndRead enables or disables o's plugin and reads its record
+// again, even when ctx was cancelled, into o.
+func (m *Manager) setEnabledAndRead(ctx context.Context, o *Outcome, enabled bool) error {
+	err := cancelled(ctx, m.setEnabledWithin(ctx, o.ID, enabled))
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), afterTimeout)
+	defer cancel()
+	after, readErr := m.find(readCtx, o.ID)
+	switch {
+	case readErr != nil:
+		o.AfterUnknown = true
+		if err == nil {
+			err = fmt.Errorf("%w: %w", ErrUnconfirmed, readErr)
+		}
+	case after == nil:
+		err = errors.Join(err, fmt.Errorf("%s is no longer installed", o.ID))
+	default:
+		s := StateOf(*after)
+		o.After = &s
+		if err == nil && s.Enabled != enabled {
+			err = fmt.Errorf("herdr accepted the change, but %s is still %s", o.ID, enabledWord(s.Enabled))
+		}
+	}
+	return err
+}
+
 // Undo is the change that takes a plugin back to where it was before the
 // last change recorded for it.
 type Undo struct {
@@ -543,7 +699,11 @@ type Undo struct {
 	// Remove is set when the change installed the plugin, so undoing it
 	// uninstalls it; Target is then unused.
 	Remove bool
-	Target Target
+	// EnabledOnly is set when the change left the plugin at the same
+	// revision and only enabled or disabled it, so undoing it changes the
+	// enabled state back without reinstalling; Target is then unused.
+	EnabledOnly bool
+	Target      Target
 }
 
 // ErrNothingToUndo is returned when no recorded change can be undone.
@@ -574,6 +734,13 @@ func (m *Manager) PlanRollback(ctx context.Context, id string) (Undo, error) {
 	case e.Before == nil:
 		u.Remove = true
 		return u, nil
+	case e.After != nil && e.Before.SameRevision(*e.After):
+		if current.Enabled != e.After.Enabled {
+			return Undo{}, fmt.Errorf("%w: %s was %s after the %s at %s, and has been %s since",
+				ErrNothingToUndo, id, enabledWord(e.After.Enabled), e.Kind, when, enabledWord(current.Enabled))
+		}
+		u.EnabledOnly = true
+		return u, nil
 	case e.Before.Source == "":
 		return Undo{}, fmt.Errorf("%s was linked from %s before; link it again with herdr plugin link", id, e.Before.Root)
 	}
@@ -591,18 +758,24 @@ func (m *Manager) PlanRollback(ctx context.Context, id string) (Undo, error) {
 // Describe says what undoing does, on one line.
 func (u Undo) Describe() string {
 	when := u.Entry.Time.Local().Format(time.DateTime)
-	if u.Remove {
+	switch {
+	case u.Remove:
 		return fmt.Sprintf("undo the %s of %s at %s: uninstall it", u.Entry.Kind, u.Entry.Plugin, when)
+	case u.EnabledOnly:
+		return fmt.Sprintf("undo the %s of %s at %s: %s it again", u.Entry.Kind, u.Entry.Plugin, when, enableVerb(u.Entry.Before.Enabled))
 	}
 	return fmt.Sprintf("undo the %s of %s at %s: back to %s", u.Entry.Kind, u.Entry.Plugin, when, u.Entry.Before)
 }
 
 // Rollback applies u.
 func (m *Manager) Rollback(ctx context.Context, u Undo, out io.Writer) Outcome {
-	if !u.Remove {
-		return m.Apply(ctx, Change{Kind: KindRollback, ID: u.Entry.Plugin, Current: u.Current, Target: u.Target}, out)
+	switch {
+	case u.Remove:
+		return m.uninstall(ctx, KindRollback, u.Entry.Plugin, out)
+	case u.EnabledOnly:
+		return m.setEnabled(ctx, KindRollback, u.Entry.Plugin, u.Entry.Before.Enabled, u.Current, out)
 	}
-	return m.uninstall(ctx, KindRollback, u.Entry.Plugin, out)
+	return m.Apply(ctx, Change{Kind: KindRollback, ID: u.Entry.Plugin, Current: u.Current, Target: u.Target}, out)
 }
 
 // HistoryEntries lists the recorded changes, the oldest first.

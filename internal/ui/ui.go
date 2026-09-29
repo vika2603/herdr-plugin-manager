@@ -558,6 +558,19 @@ func (m *model) onRollback(msg rollbackMsg) tea.Cmd {
 			run:    func() tea.Cmd { return m.uninstall(p.PluginID) },
 		}
 		return nil
+	case msg.undo.EnabledOnly:
+		if !m.idle() {
+			return nil
+		}
+		u := msg.undo
+		m.confirm = &confirm{
+			prompt: "Roll back " + p.PluginID + "? That would " + u.Describe(),
+			run: func() tea.Cmd {
+				c := pendingChange{kind: manager.KindRollback, plugin: p, undo: &u}
+				return m.applyChange(c)
+			},
+		}
+		return nil
 	}
 	u := msg.undo
 	c := &pendingChange{kind: manager.KindRollback, plugin: p, target: u.Target, note: u.Describe(), undo: &u}

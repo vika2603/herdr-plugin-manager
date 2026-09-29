@@ -1293,3 +1293,21 @@ func TestEnterInAPreviewDoesNotInstall(t *testing.T) {
 		t.Errorf("no hint for the install key:\n%s", h.screen())
 	}
 }
+
+func TestRollbackOfAnEnabledStateChangeAsksWithoutAPreview(t *testing.T) {
+	before := manager.State{Version: "1.0.0", Source: "o/alpha", Ref: "v1.0.0", Commit: "c1", Enabled: true}
+	after := before
+	after.Enabled = false
+	b := newFake()
+	b.undo = manager.Undo{Entry: manager.Entry{Kind: manager.KindRestore, Plugin: "alpha", Before: &before, After: &after}, EnabledOnly: true}
+	h := start(t, b)
+	h.press("z")
+	if h.m.confirm == nil || !strings.Contains(h.m.confirm.prompt, "Roll back alpha? That would undo the restore of alpha") ||
+		!strings.Contains(h.m.confirm.prompt, "enable it again") {
+		t.Fatalf("confirm = %+v", h.m.confirm)
+	}
+	h.press("y")
+	if got := b.Calls(); !slices.Equal(got, []string{"plan-rollback alpha", "rollback alpha "}) {
+		t.Errorf("calls = %q", got)
+	}
+}

@@ -140,6 +140,29 @@ components.
 | `hpm reinstall <id>` | reinstall the installed version |
 | `hpm logs <id>` | recent commands herdr ran for a plugin |
 | `hpm doctor` | check herdr, its server and config, key bindings, git, GitHub and the installed plugins |
+| `hpm export [-o file]` | write the installed plugins to a file |
+| `hpm restore <file> [id...]` | preview, then install the plugins of an export as exported; `--exclude` and `--dry-run` as for update |
+
+`hpm export` writes every installed plugin as JSON: its source, the ref it
+follows, the commit installed and whether it is enabled. `hpm restore` reads
+that file on another machine and first lists what each plugin needs there:
+an install, a change from what is installed, only enabling or disabling it,
+or nothing. It also lists which plugins cannot be restored and why: a
+locally linked plugin, which only `herdr plugin link` can bring back; a
+source hpm cannot install; the same id installed here from another source
+or linked locally; a manifest at the exported commit that cannot be read or
+cannot run here. Each install is then shown in full, and nothing runs until
+the plan is confirmed. herdr is asked for the exported commit, and the
+plugin follows the exported ref afterwards; when that ref has moved on, the
+plan says an update will be available. No plugin is installed from another
+source or at another commit in its place, and plugins not in the export are
+left alone. Just before each plugin is changed its record is read again, and
+one that changed after the plan was made is left as it is until restore is
+run again. The results say, for each plugin, whether it was restored,
+unchanged, failed, cancelled, unconfirmed, not started or not restored, and
+the command exits with an error unless every plugin asked for is as
+exported. Each change, including one that only enables or disables a
+plugin, is recorded as a restore that `hpm rollback` undoes.
 
 The marketplace lists what each plugin is for, its stars and last push, and
 whether it is installed, installed from another source or linked locally
