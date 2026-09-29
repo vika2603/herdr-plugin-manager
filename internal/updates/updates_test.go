@@ -144,7 +144,7 @@ func TestDescribe(t *testing.T) {
 		t.Errorf("tag: %q", got)
 	}
 	r = Result{Kind: Available, CurrentCommit: strings.Repeat("1", 40), TargetCommit: strings.Repeat("2", 40)}
-	if got := r.Describe(); got != "default branch: 111111111111 -> 222222222222" {
+	if got := r.Describe(); got != "new commits on the default branch (111111111111 -> 222222222222)" {
 		t.Errorf("branch: %q", got)
 	}
 }

@@ -103,6 +103,9 @@ func (m *model) result(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		msg.d.loading = false
 		msg.d.preview, msg.d.err = msg.preview, msg.err
+		return m.loadExplain(msg.d), true
+	case explainMsg:
+		msg.d.explain = &msg.explain
 	case readmeMsg:
 		m.onReadme(msg)
 	case releasesMsg:
@@ -578,7 +581,7 @@ func (m *model) openUpdate(p herdr.InstalledPluginInfo) tea.Cmd {
 		return nil
 	}
 	c := updateChange(ch)
-	d := &detail{crumb: tabNames[tabInstalled], title: "Update " + p.Name + " (" + ch.Result.Describe() + ")", loading: true, change: &c}
+	d := &detail{crumb: tabNames[tabInstalled], title: "Update " + p.Name, loading: true, change: &c}
 	m.detail, m.screen = d, screenDetail
 	return m.withSpinner(m.loadPreview(d, ch.Result.Source, ch.Result.TargetCommit, ""))
 }

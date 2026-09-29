@@ -526,6 +526,8 @@ func (c *cli) updateOne(ctx context.Context, ch manager.Checked, herdrVersion st
 		return false, nil
 	}
 	preview.RequireID(id)
+	printSections(c.out, c.m.Explain(ctx, ch.Plugin, preview).Sections())
+	fmt.Fprintln(c.out)
 	printSections(c.out, preview.Sections())
 	if len(preview.Problems) > 0 {
 		fmt.Fprintf(c.errOut, "skipping %s: see the problems above\n", id)
@@ -629,6 +631,8 @@ func (c *cli) versionCmd(kind manager.ChangeKind) *cobra.Command {
 				preview.RequireInstalledCommit(*p)
 			}
 			fmt.Fprintf(c.out, "%s now: %s; %s\n\n", id, manager.StateOf(*p), manager.TrackingOf(*p).Describe())
+			printSections(c.out, c.m.Explain(ctx, *p, preview).Sections())
+			fmt.Fprintln(c.out)
 			printSections(c.out, preview.Sections())
 			if len(preview.Problems) > 0 {
 				return fmt.Errorf("not changing %s: see the problems above", id)
@@ -681,6 +685,10 @@ func (c *cli) rollbackCmd() *cobra.Command {
 				}
 				preview.RequireID(args[0])
 				fmt.Fprintln(c.out)
+				if u.Current != nil {
+					printSections(c.out, c.m.Explain(ctx, *u.Current, preview).Sections())
+					fmt.Fprintln(c.out)
+				}
 				printSections(c.out, preview.Sections())
 				if len(preview.Problems) > 0 {
 					return errors.New("not rolling back: see the problems above")

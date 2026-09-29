@@ -69,7 +69,11 @@ func (r Result) Describe() string {
 		if r.TargetRef != r.CurrentRef {
 			return fmt.Sprintf("%s -> %s", refLabel(r.CurrentRef, r.CurrentCommit), r.TargetRef)
 		}
-		return fmt.Sprintf("%s: %s -> %s", refLabel(r.CurrentRef, ""), short(r.CurrentCommit), short(r.TargetCommit))
+		branch := r.CurrentRef
+		if branch == "" {
+			branch = "the default branch"
+		}
+		return fmt.Sprintf("new commits on %s (%s -> %s)", branch, short(r.CurrentCommit), short(r.TargetCommit))
 	case Pinned:
 		return "pinned to " + short(r.CurrentRef)
 	case Local:

@@ -38,6 +38,7 @@ type Backend interface {
 	Uninstall(ctx context.Context, id string, out io.Writer) error
 	PlanRollback(ctx context.Context, id string) (manager.Undo, error)
 	Versions(ctx context.Context, src source.GitHub) (manager.Versions, error)
+	Explain(ctx context.Context, p herdr.InstalledPluginInfo, preview *manager.Preview) manager.Explanation
 	PreviewAt(ctx context.Context, src source.GitHub, ref, commit, herdrVersion string, installed []herdr.InstalledPluginInfo) (*manager.Preview, error)
 	Rollback(ctx context.Context, u manager.Undo, out io.Writer) manager.Outcome
 	CheckAll(ctx context.Context, plugins []herdr.InstalledPluginInfo) []manager.Checked
@@ -186,6 +187,11 @@ type detail struct {
 	entry *market.Entry
 	// versions is open while the user picks another version to preview.
 	versions *versionPicker
+	// explain describes a change's preview once it is read, and notes are
+	// its release notes rendered at notesWidth.
+	explain    *manager.Explanation
+	notes      []string
+	notesWidth int
 
 	view   view
 	readme readme
@@ -350,6 +356,10 @@ type (
 		enabled bool
 		err     error
 	}
+	explainMsg struct {
+		d       *detail
+		explain manager.Explanation
+	}
 	rollbackMsg struct {
 		plugin herdr.InstalledPluginInfo
 		undo   manager.Undo
@@ -402,6 +412,18 @@ func (m *model) loadLogs(id string) tea.Cmd {
 	return func() tea.Msg {
 		logs, err := m.b.Logs(m.ctx, id, logLimit)
 		return logsMsg{id: id, logs: logs, err: err}
+	}
+}
+
+// loadExplain describes what a change's preview changes, reading the
+// release notes or commits it brings in.
+func (m *model) loadExplain(d *detail) tea.Cmd {
+	if d.change == nil || d.preview == nil {
+		return nil
+	}
+	p, preview := d.change.plugin, d.preview
+	return func() tea.Msg {
+		return explainMsg{d: d, explain: m.b.Explain(m.ctx, p, preview)}
 	}
 }
 

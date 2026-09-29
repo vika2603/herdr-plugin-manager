@@ -41,8 +41,9 @@ type fakeBackend struct {
 	// undo is what PlanRollback returns, with undoErr.
 	undo    manager.Undo
 	undoErr error
-	// versions is what Versions returns.
+	// versions is what Versions returns, and explain what Explain does.
 	versions manager.Versions
+	explain  *manager.Explanation
 	// previewGate, when set, keeps Preview reading its plugin list until it
 	// is closed.
 	previewGate chan struct{}
@@ -107,6 +108,13 @@ func (f *fakeBackend) Apply(ctx context.Context, c manager.Change, out io.Writer
 		o.After = &after
 	}
 	return o
+}
+
+func (f *fakeBackend) Explain(_ context.Context, p herdr.InstalledPluginInfo, preview *manager.Preview) manager.Explanation {
+	if f.explain != nil {
+		return *f.explain
+	}
+	return manager.Explanation{Headline: "Changes to " + p.PluginID, From: p.Version, To: preview.Manifest.Version}
 }
 
 func (f *fakeBackend) Versions(_ context.Context, src source.GitHub) (manager.Versions, error) {
@@ -717,6 +725,44 @@ func TestInstalledVersions(t *testing.T) {
 			t.Fatalf("choosing the installed version should preview a reinstall:\n%s", out)
 		}
 	})
+}
+
+func TestUpdatePreviewSaysWhatChangesInWords(t *testing.T) {
+	installed, next := "bb74c548c3a9"+strings.Repeat("0", 28), "d3ba3c61147d"+strings.Repeat("0", 28)
+	b := newFake()
+	p := plugin("alpha", true)
+	p.Name, p.Version = "Auto Title", "0.5.0"
+	src := p.Source.ValueOrZero()
+	src.ResolvedCommit = herdr.Some(installed)
+	p.Source = herdr.Some(src)
+	b.plugins = []herdr.InstalledPluginInfo{p}
+	b.checks = map[string]updates.Result{"alpha": {
+		Kind: updates.Available, Source: source.GitHub{Owner: "o", Repo: "alpha"}, CurrentCommit: installed, TargetCommit: next,
+	}}
+	b.explain = &manager.Explanation{
+		Headline: "New commits on the default branch; the version number stays 0.5.0",
+		From:     "0.5.0 at default branch (bb74c548c3a9)", To: "0.5.0 at default branch (d3ba3c61147d)",
+		Commits: &market.Comparison{Status: "ahead", Total: 2, Commits: []market.Commit{{Title: "Name tabs after the running command", Author: "Ann"}, {Title: "Fix a crash on empty panes", Author: "Bo"}}},
+		Runs:    []string{"+ build: go build ./cmd/auto-title"},
+	}
+	h := start(t, b)
+	h.press("u")
+	out := h.words()
+	t.Log("\n" + out)
+	for _, want := range []string{
+		"Installed › Update Auto Title herdr",
+		"New commits on the default branch; the version number stays 0.5.0",
+		"FROM 0.5.0 at default branch (bb74c548c3a9)", "TO 0.5.0 at default branch (d3ba3c61147d)",
+		"COMMITS 2 new", "Name tabs after the running command (Ann)",
+		"MANIFEST CHANGES", "+ build: go build ./cmd/auto-title",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("preview lacks %q", want)
+		}
+	}
+	if strings.Count(out, "d3ba3c6") != 1 || strings.Count(out, "bb74c54") != 1 {
+		t.Errorf("each commit should be shown once:\n%s", out)
+	}
 }
 
 func TestRollback(t *testing.T) {

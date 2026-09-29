@@ -493,15 +493,13 @@ func (m *model) highlight(text string, terms []string, base lipgloss.Style) stri
 	return out.String()
 }
 
-// updateTarget names what an update moves to in the space of a mark.
+// updateTarget names what an update moves to in the space of a mark: a new
+// release, or new commits on the branch the plugin follows.
 func updateTarget(r updates.Result) string {
 	if r.TargetRef != "" && r.TargetRef != r.CurrentRef {
 		return r.TargetRef
 	}
-	if len(r.TargetCommit) > 7 {
-		return r.TargetCommit[:7]
-	}
-	return r.TargetCommit
+	return "new commits"
 }
 
 func (m *model) browseItems() []string {
@@ -587,12 +585,84 @@ func (m *model) detailLines(d *detail) []string {
 	case d.err != nil:
 		return wrapIndented(indent+m.theme.err.Render(glyphFailed+" "+safe.Line(d.err.Error())), m.w()-1)
 	}
-	lines := m.previewLines(d.preview)
-	if c := d.change; c != nil && c.note != "" {
-		note := wrapIndented(indent+m.theme.warn.Render(safe.Line(c.note)), m.w()-1)
-		lines = append(append(note, ""), lines...)
+	c := d.change
+	lines := m.previewLines(d.preview, c != nil)
+	if c == nil {
+		return lines
 	}
-	return lines
+	head := m.changeLines(d)
+	if c.note != "" {
+		head = append(append(wrapIndented(indent+m.theme.warn.Render(safe.Line(c.note)), m.w()-1), ""), head...)
+	}
+	return append(head, lines...)
+}
+
+// changeLines say what a change does, before its full preview: in words,
+// from and to which version, what the authors wrote about it, and what
+// changes in what the plugin runs.
+func (m *model) changeLines(d *detail) []string {
+	t := m.theme
+	e := d.explain
+	if e == nil {
+		return []string{indent + t.faint.Render("Reading what changed…"), ""}
+	}
+	w := m.w() - 1
+	out := wrapIndented(indent+t.bold.Render(safe.Line(e.Headline)), w)
+	out = append(out, "")
+	out = append(out, m.fields([]field{{"from", t.fg2.Render(safe.Line(e.From))}, {"to", t.text.Render(safe.Line(e.To))}})...)
+	switch {
+	case len(e.Releases) > 0:
+		out = append(out, m.releaseNotes(d)...)
+	case e.Commits != nil:
+		out = append(out, "", m.heading("Commits", e.CommitsNote(), t.faint))
+		for _, l := range e.CommitLines(15) {
+			out = append(out, wrapIndented(subIndent+t.text.Render(l), w)...)
+		}
+	case e.NotesErr != nil:
+		out = append(out, "", m.heading("What changed", "", t.faint))
+		out = append(out, wrapIndented(subIndent+t.warn.Render(glyphWarning+" Not known: "+oneLine(e.NotesErr.Error())), w)...)
+	}
+	out = append(out, "", m.heading("Manifest changes", "", t.faint))
+	if len(e.Runs) == 0 {
+		out = append(out, subIndent+t.faint.Render("No change to what it runs or needs"))
+	}
+	for _, r := range e.Runs {
+		style := t.text
+		if strings.HasPrefix(r, "+ ") {
+			style = t.warn
+		}
+		out = append(out, wrapIndented(subIndent+style.Render(r), w)...)
+	}
+	return append(out, "", m.heading("Manifest", "", t.faint))
+}
+
+// releaseNotes renders the notes of the releases a change brings in,
+// keeping them for the width they were rendered at.
+func (m *model) releaseNotes(d *detail) []string {
+	width := max(m.w()-6, 20)
+	if d.notes != nil && d.notesWidth == width {
+		return d.notes
+	}
+	t := m.theme
+	var out []string
+	for _, r := range d.explain.Releases {
+		title := "Release " + r.Tag
+		if r.Name != "" && r.Name != r.Tag {
+			title += " · " + r.Name
+		}
+		note := ""
+		if !r.PublishedAt.IsZero() {
+			note = r.PublishedAt.Format("2006-01-02")
+		}
+		out = append(out, "", m.heading(title, note, t.faint))
+		if strings.TrimSpace(r.Notes) == "" {
+			out = append(out, subIndent+t.faint.Render("This release has no notes."))
+			continue
+		}
+		out = append(out, m.render(r.Notes, width)...)
+	}
+	d.notes, d.notesWidth = out, width
+	return out
 }
 
 // wrapIndented wraps line to width, continuing wrapped lines at the line's
@@ -658,8 +728,9 @@ func (m *model) entryLines(e *market.Entry) []string {
 }
 
 // previewLines lay out an install or update preview: what the plugin is,
-// where it comes from, then what it runs.
-func (m *model) previewLines(p *manager.Preview) []string {
+// where it comes from, then what it runs. A change's preview leaves the
+// commit and what it replaces to the lines above it.
+func (m *model) previewLines(p *manager.Preview, change bool) []string {
 	t := m.theme
 	mf := p.Manifest
 	out := []string{m.titleLine(safe.Line(mf.Name), safe.Line(mf.Version), safe.Line(mf.ID))}
@@ -684,14 +755,17 @@ func (m *model) previewLines(p *manager.Preview) []string {
 		platforms[i] = string(pl)
 	}
 	rows := []field{
-		{"source", t.text.Render(p.Source.String()) + t.faint.Render(" @ ") + t.text.Render(ref) + " " + t.faint.Render(commit)},
+		{"source", t.text.Render(p.Source.String()) + t.faint.Render(" @ ") + t.text.Render(ref)},
 		{"link", t.fg2.Render(p.Source.WebURL())},
 		{"runs on", m.runsOn(platforms, safe.Line(mf.MinHerdrVersion), len(p.Problems) == 0)},
 	}
 	if len(p.Releases) > 0 {
 		rows = append(rows, field{"releases", m.releasesValue(p.Releases)})
 	}
-	if p.Existing != nil {
+	if !change {
+		rows[0].value += " " + t.faint.Render(commit)
+	}
+	if p.Existing != nil && !change {
 		rows = append(rows, field{"replaces", t.text.Render(p.Existing.Version) + t.faint.Render(" from "+manager.SourceLabel(*p.Existing))})
 	}
 	rows = append(rows, field{"updates", t.fg2.Render(safe.Line(manager.TrackingAt(p.Ref, p.Commit).Describe()))})

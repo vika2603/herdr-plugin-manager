@@ -51,7 +51,12 @@ Open the popup, or run `hpm` with no arguments for the same interface in the
 terminal. Press `?` for every key; the mouse scrolls, and a click selects,
 then opens. `i` installs from the preview, which shows what the plugin runs.
 On an installed plugin, `v` lists its versions to switch to, and reinstalls,
-pins or unpins it; `z` rolls back the last change.
+pins or unpins it; `z` rolls back the last change. The preview of an update
+or another change first says what it is, such as a new release or new
+commits on the branch the plugin follows with the same version number, then
+shows the release notes, or the commit titles when there are none, and what
+changes in what the plugin runs. When GitHub cannot be read, the preview
+says the changes are not known.
 An install takes the latest release of a plugin at the root of its
 repository, else the default branch; `v` in the preview chooses another
 version and shows its release notes.
