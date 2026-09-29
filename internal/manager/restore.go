@@ -265,10 +265,10 @@ func (it RestoreItem) Describe() string {
 	case RestoreConflict:
 		return safe.Line("conflict: " + it.Blocker)
 	case RestoreLocal, RestoreUnsupported:
-		return safe.Line("cannot restore: " + it.Blocker)
+		return safe.Line("cannot import: " + it.Blocker)
 	}
 	if it.Blocker != "" {
-		s += "; cannot restore: " + it.Blocker
+		s += "; cannot import: " + it.Blocker
 	}
 	return safe.Line(s)
 }
@@ -344,7 +344,7 @@ func (m *Manager) planItem(ctx context.Context, p ExportedPlugin, installed []he
 	switch {
 	case p.Kind == ExportLocal:
 		it.Action = RestoreLocal
-		it.Blocker = "linked locally from " + p.Root + " where it was exported; hpm cannot restore a link, so link its directory here with herdr plugin link"
+		it.Blocker = "linked locally from " + p.Root + " where it was exported; hpm cannot import a link, so link its directory here with herdr plugin link"
 		if it.Current != nil {
 			it.Blocker += "; installed here as " + StateOf(*it.Current).String()
 		}
@@ -359,11 +359,11 @@ func (m *Manager) planItem(ctx context.Context, p ExportedPlugin, installed []he
 		switch {
 		case now.Source == "":
 			it.Action = RestoreConflict
-			it.Blocker = "linked locally here from " + now.Root + "; unlink it to restore it from " + p.Source
+			it.Blocker = "linked locally here from " + now.Root + "; unlink it to import it from " + p.Source
 			return it
 		case now.Source != p.Source:
 			it.Action = RestoreConflict
-			it.Blocker = "installed here from " + now.Source + ", not " + p.Source + "; uninstall it to restore it from the export"
+			it.Blocker = "installed here from " + now.Source + ", not " + p.Source + "; uninstall it to import it from the export"
 			return it
 		case now.SameRevision(p.state()) && now.Enabled == p.IsEnabled():
 			it.Action = RestoreUnchanged
@@ -514,7 +514,7 @@ func (m *Manager) Restore(ctx context.Context, it RestoreItem, out io.Writer) Ou
 		return m.setEnabled(ctx, KindRestore, it.Plugin.ID, it.Action == RestoreEnable, it.Current, out)
 	case RestoreUnchanged, RestoreConflict, RestoreLocal, RestoreUnsupported:
 	}
-	o := Outcome{Kind: KindRestore, ID: it.Plugin.ID, Err: fmt.Errorf("%s is not restored: %s", it.Plugin.ID, it.Action)}
+	o := Outcome{Kind: KindRestore, ID: it.Plugin.ID, Err: fmt.Errorf("%s is not imported: %s", it.Plugin.ID, it.Action)}
 	if it.Current != nil {
 		s := StateOf(*it.Current)
 		o.Before, o.After = &s, &s

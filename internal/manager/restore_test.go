@@ -319,7 +319,7 @@ func TestRestoreChangesOnlyTheEnabledStateAndCanBeRolledBack(t *testing.T) {
 	if err != nil || !u.EnabledOnly || u.Remove {
 		t.Fatalf("undo = %+v, %v; want the enabled state changed back", u, err)
 	}
-	if !strings.Contains(u.Describe(), "undo the restore of o.toggle") || !strings.HasSuffix(u.Describe(), ": enable it again") {
+	if !strings.Contains(u.Describe(), "undo the import of o.toggle") || !strings.HasSuffix(u.Describe(), ": enable it again") {
 		t.Errorf("describe = %q", u.Describe())
 	}
 	o = r.m.Rollback(context.Background(), u, nil)

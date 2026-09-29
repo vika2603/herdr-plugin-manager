@@ -1314,7 +1314,7 @@ func TestRollbackOfAnEnabledStateChangeAsksWithoutAPreview(t *testing.T) {
 	b.undo = manager.Undo{Entry: manager.Entry{Kind: manager.KindRestore, Plugin: "alpha", Before: &before, After: &after}, EnabledOnly: true}
 	h := start(t, b)
 	h.press("z")
-	if h.m.confirm == nil || !strings.Contains(h.m.confirm.prompt, "Roll back alpha? That would undo the restore of alpha") ||
+	if h.m.confirm == nil || !strings.Contains(h.m.confirm.prompt, "Roll back alpha? That would undo the import of alpha") ||
 		!strings.Contains(h.m.confirm.prompt, "enable it again") {
 		t.Fatalf("confirm = %+v", h.m.confirm)
 	}

@@ -20,11 +20,11 @@ func (c *cli) exportCmd() *cobra.Command {
 	var output string
 	cmd := &cobra.Command{
 		Use:   "export",
-		Short: "Write the installed plugins to a file hpm restore reads",
+		Short: "Write the installed plugins to a file hpm import reads",
 		Long: "Write every installed and linked plugin as JSON: its source, the ref it\n" +
-			"follows, the commit installed and whether it is enabled. hpm restore reads\n" +
+			"follows, the commit installed and whether it is enabled. hpm import reads\n" +
 			"the file on another machine. A locally linked plugin is listed with its\n" +
-			"directory, which restore cannot bring back.",
+			"directory, which import cannot bring back.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			exp, err := c.m.Export(cmd.Context())
@@ -84,10 +84,10 @@ func (c *cli) exportSummary(exp *manager.Export, output string) {
 		}
 	}
 	if len(local) > 0 {
-		fmt.Fprintf(c.errOut, "Linked locally, which restore lists but cannot install: %s\n", strings.Join(local, ", "))
+		fmt.Fprintf(c.errOut, "Linked locally, which import lists but cannot install: %s\n", strings.Join(local, ", "))
 	}
 	if len(other) > 0 {
-		fmt.Fprintf(c.errOut, "From a source restore cannot install: %s\n", strings.Join(other, ", "))
+		fmt.Fprintf(c.errOut, "From a source import cannot install: %s\n", strings.Join(other, ", "))
 	}
 }
 
@@ -97,13 +97,13 @@ func (c *cli) restoreCmd() *cobra.Command {
 		exclude     []string
 	)
 	cmd := &cobra.Command{
-		Use:   "restore <file> [plugin-id...]",
+		Use:   "import <file> [plugin-id...]",
 		Short: "Install the plugins of an export as they were exported",
 		Long: "Bring this machine's plugins to what hpm export wrote, for the plugins named\n" +
 			"or all of them. Each plugin is installed from its source at the exported\n" +
 			"commit, follows the exported ref afterwards, and is enabled or disabled as\n" +
 			"exported. Plugins installed here and not in the export are left alone.\n\n" +
-			"The plan comes first: what each plugin needs, and which cannot be restored\n" +
+			"The plan comes first: what each plugin needs, and which cannot be imported\n" +
 			"and why, such as a local link, a source hpm cannot install, the same id\n" +
 			"installed here from another source, or a manifest that cannot run here. Then\n" +
 			"each install is shown in full, and nothing runs until the plan is confirmed.\n" +
@@ -111,10 +111,10 @@ func (c *cli) restoreCmd() *cobra.Command {
 			"what was exported.\n\n" +
 			"Just before each plugin is changed, its record is read again; a plugin that\n" +
 			"changed after the plan was made, such as one installed from another source\n" +
-			"meanwhile, is left as it is, and restore must be run again to review it.\n\n" +
+			"meanwhile, is left as it is, and import must be run again to review it.\n\n" +
 			"Keeping a plugin disabled, and enabling or disabling one, needs a running\n" +
 			"herdr server. Each change, including one that only enables or disables a\n" +
-			"plugin, is recorded in the history as a restore, which hpm rollback undoes.\n" +
+			"plugin, is recorded in the history as an import, which hpm rollback undoes.\n" +
 			"The command exits with an error when any plugin asked for is not as\n" +
 			"exported afterwards.",
 		Args: cobra.MinimumNArgs(1),
@@ -142,10 +142,10 @@ func (c *cli) restoreCmd() *cobra.Command {
 				return notRestored(plan.Items)
 			}
 			if len(run) == 0 {
-				fmt.Fprintln(c.out, "\nNothing to restore.")
+				fmt.Fprintln(c.out, "\nNothing to import.")
 				return notRestored(plan.Items)
 			}
-			if err := c.confirm(yes, "\nRestore "+plural(len(run), "plugin")+" as planned above?"); err != nil {
+			if err := c.confirm(yes, "\nImport "+plural(len(run), "plugin")+" as planned above?"); err != nil {
 				if errors.Is(err, errCancelled) {
 					fmt.Fprintln(c.out, "Nothing was changed.")
 				}
@@ -156,7 +156,7 @@ func (c *cli) restoreCmd() *cobra.Command {
 			return restoreError(plan.Items, results)
 		},
 	}
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "restore without asking")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "import without asking")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show the plan in full without changing anything")
 	cmd.Flags().StringSliceVar(&exclude, "exclude", nil, "leave this plugin out; repeat or separate with commas")
 	return cmd
@@ -207,7 +207,7 @@ func (c *cli) printRestorePlan(path string, exp *manager.Export, plan manager.Re
 	if exp.HerdrVersion != "" {
 		from += " with herdr " + safe.Line(exp.HerdrVersion)
 	}
-	fmt.Fprintf(c.out, "Restore from %s, %s:\n", path, from)
+	fmt.Fprintf(c.out, "Import from %s, %s:\n", path, from)
 	tw := c.table()
 	counts := map[string]int{}
 	for _, it := range plan.Items {
@@ -218,12 +218,12 @@ func (c *cli) printRestorePlan(path string, exp *manager.Export, plan manager.Re
 		case it.Action == manager.RestoreUnchanged:
 			counts["unchanged"]++
 		default:
-			counts["cannot be restored"]++
+			counts["cannot be imported"]++
 		}
 	}
 	_ = tw.Flush()
 	var parts []string
-	for _, k := range []string{"to change", "unchanged", "cannot be restored"} {
+	for _, k := range []string{"to change", "unchanged", "cannot be imported"} {
 		if counts[k] > 0 {
 			parts = append(parts, fmt.Sprintf("%d %s", counts[k], k))
 		}
@@ -253,10 +253,10 @@ func (c *cli) printRestoreItem(it manager.RestoreItem) {
 	printSections(c.out, it.Preview.Sections())
 	if len(it.Notes) > 0 {
 		fmt.Fprintln(c.out)
-		printSections(c.out, []manager.Section{{Title: "Restore", Lines: safeLines(it.Notes)}})
+		printSections(c.out, []manager.Section{{Title: "Import", Lines: safeLines(it.Notes)}})
 	}
 	if it.Blocker != "" {
-		fmt.Fprintf(c.errOut, "not restoring %s: %s\n", safe.Line(it.Plugin.ID), safe.Line(it.Blocker))
+		fmt.Fprintf(c.errOut, "not importing %s: %s\n", safe.Line(it.Plugin.ID), safe.Line(it.Blocker))
 	}
 }
 
@@ -279,7 +279,7 @@ func (c *cli) runRestore(ctx context.Context, items []manager.RestoreItem) map[s
 			results[it.Plugin.ID] = restoreRun{notStarted: true}
 			continue
 		}
-		fmt.Fprintf(c.out, "\nRestoring %s (%s)\n", safe.Line(it.Plugin.ID), it.Action)
+		fmt.Fprintf(c.out, "\nImporting %s (%s)\n", safe.Line(it.Plugin.ID), it.Action)
 		o := c.m.Restore(ctx, it, c.out)
 		if err := o.Error(); err != nil {
 			fmt.Fprintf(c.errOut, "%v\n", err)
@@ -297,7 +297,7 @@ func resultLabel(it manager.RestoreItem, r restoreRun, ran bool) string {
 	case it.Action == manager.RestoreUnchanged:
 		return "unchanged"
 	case !it.Runs():
-		return "not restored"
+		return "not imported"
 	case !ran || r.notStarted:
 		return "not started"
 	}
@@ -311,14 +311,14 @@ func resultLabel(it manager.RestoreItem, r restoreRun, ran bool) string {
 		case manager.RestoreInstall, manager.RestoreChange, manager.RestoreUnchanged,
 			manager.RestoreConflict, manager.RestoreLocal, manager.RestoreUnsupported:
 		}
-		return "restored"
+		return "imported"
 	default:
 		return string(res)
 	}
 }
 
 func (c *cli) printRestoreResults(plan manager.RestorePlan, results map[string]restoreRun) {
-	fmt.Fprintln(c.out, "\nRestore results:")
+	fmt.Fprintln(c.out, "\nImport results:")
 	tw := c.table()
 	for _, it := range plan.Items {
 		r, ran := results[it.Plugin.ID]
@@ -351,7 +351,7 @@ func notRestored(items []manager.RestoreItem) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	return fmt.Errorf("not restored: %s", safeList(ids))
+	return fmt.Errorf("not imported: %s", safeList(ids))
 }
 
 // restoreError names every plugin asked for that is not as exported after
@@ -361,19 +361,19 @@ func restoreError(items []manager.RestoreItem, results map[string]restoreRun) er
 	for _, it := range items {
 		r, ran := results[it.Plugin.ID]
 		switch label := resultLabel(it, r, ran); label {
-		case "unchanged", "restored", "enabled", "disabled":
+		case "unchanged", "imported", "enabled", "disabled":
 		default:
 			groups[label] = append(groups[label], it.Plugin.ID)
 		}
 	}
 	var errs []error
-	for _, label := range []string{"failed", "unconfirmed", "cancelled", "not started", "not restored", string(manager.ResultChanged)} {
+	for _, label := range []string{"failed", "unconfirmed", "cancelled", "not started", "not imported", string(manager.ResultChanged)} {
 		if ids := groups[label]; len(ids) > 0 {
 			errs = append(errs, fmt.Errorf("%s: %s", label, safeList(ids)))
 		}
 	}
 	if len(groups[string(manager.ResultChanged)]) > 0 {
-		errs = append(errs, errors.New("run hpm restore again to review the plan as things are now"))
+		errs = append(errs, errors.New("run hpm import again to review the plan as things are now"))
 	}
 	return errors.Join(errs...)
 }

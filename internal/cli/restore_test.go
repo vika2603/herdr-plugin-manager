@@ -37,48 +37,48 @@ func TestExportThenRestoreElsewhere(t *testing.T) {
 	to := newHarness(t)
 	to.installs(`{"result":{"type":"plugin_list","plugins":[{"plugin_id":"carol.gadget","name":"Gadget","version":"0.2.0","enabled":true,"manifest_path":"/x","plugin_root":"/x",` +
 		`"source":{"kind":"github","owner":"carol","repo":"gadget","requested_ref":"` + head + `","resolved_commit":"` + head + `"}}]}}`)
-	out, _, err := to.run("", false, "restore", file)
+	out, _, err := to.run("", false, "import", file)
 	if !errors.Is(err, errNeedYes) {
 		t.Fatalf("without a terminal or --yes: %v", err)
 	}
 	for _, want := range []string{
 		"carol.gadget  install 0.2.0 at default branch (bbbbbbbbbbbb), enabled; follows the default branch",
-		"me.dev        cannot restore: linked locally from /src/dev where it was exported",
-		"1 to change, 1 cannot be restored.",
+		"me.dev        cannot import: linked locally from /src/dev where it was exported",
+		"1 to change, 1 cannot be imported.",
 		"== carol.gadget (install)", "Build commands",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the plan lacks %q:\n%s", want, out)
 		}
 	}
-	out, _, err = to.run("", false, "restore", file, "--dry-run")
-	if err == nil || err.Error() != "not restored: me.dev" || !strings.Contains(out, "Dry run: nothing was changed.") {
+	out, _, err = to.run("", false, "import", file, "--dry-run")
+	if err == nil || err.Error() != "not imported: me.dev" || !strings.Contains(out, "Dry run: nothing was changed.") {
 		t.Errorf("dry run: %v\n%s", err, out)
 	}
 	if to.ran("plugin install") {
 		t.Fatalf("installed before the plan was confirmed: %q", to.calls())
 	}
 
-	out, _, err = to.run("", false, "restore", file, "--yes")
-	if err == nil || err.Error() != "not restored: me.dev" {
+	out, _, err = to.run("", false, "import", file, "--yes")
+	if err == nil || err.Error() != "not imported: me.dev" {
 		t.Errorf("err = %v, want the link reported", err)
 	}
 	if !to.ran("plugin install carol/gadget --ref " + head + " --yes") {
 		t.Errorf("herdr was not asked for the exported commit: %q", to.calls())
 	}
-	if !strings.Contains(out, "carol.gadget  restored      carol.gadget is installed: 0.2.0 at default branch (bbbbbbbbbbbb), enabled") ||
-		!strings.Contains(out, "me.dev        not restored  cannot restore: linked locally") {
+	if !strings.Contains(out, "carol.gadget  imported      carol.gadget is installed: 0.2.0 at default branch (bbbbbbbbbbbb), enabled") ||
+		!strings.Contains(out, "me.dev        not imported  cannot import: linked locally") {
 		t.Errorf("the results do not say how each plugin ended:\n%s", out)
 	}
 	if out, _, _ := to.run("", false, "info", "carol.gadget"); !strings.Contains(out, "updates: follows the default branch") {
 		t.Errorf("the restored plugin does not follow the exported ref:\n%s", out)
 	}
-	if out, _, _ := to.run("", false, "history"); !strings.Contains(out, "restore  carol.gadget  done") {
+	if out, _, _ := to.run("", false, "history"); !strings.Contains(out, "import  carol.gadget  done") {
 		t.Errorf("the restore is not in the history:\n%s", out)
 	}
 
-	out, _, err = to.run("", false, "restore", file, "--yes", "--exclude", "me.dev")
-	if err != nil || !strings.Contains(out, "unchanged: already installed as exported") || !strings.Contains(out, "Nothing to restore.") ||
+	out, _, err = to.run("", false, "import", file, "--yes", "--exclude", "me.dev")
+	if err != nil || !strings.Contains(out, "unchanged: already installed as exported") || !strings.Contains(out, "Nothing to import.") ||
 		!strings.Contains(out, "Left out: me.dev") {
 		t.Errorf("restoring again: %v\n%s", err, out)
 	}
@@ -119,18 +119,18 @@ func TestRestoreReportsEachPlugin(t *testing.T) {
 		`{"id":"dave.tool","enabled":true,"kind":"github","source":"dave/tool","commit":"`+head+`"},`+
 			`{"id":"carol.gadget","enabled":true,"kind":"github","source":"carol/gadget","ref":"main","commit":"`+head+`"},`+
 			`{"id":"erin.quiet","enabled":false,"kind":"github","source":"erin/quiet","commit":"`+head+`"}`)
-	out, stderr, err := h.run("", false, "restore", file, "--yes")
-	if err == nil || err.Error() != "failed: dave.tool\nnot restored: erin.quiet" {
+	out, stderr, err := h.run("", false, "import", file, "--yes")
+	if err == nil || err.Error() != "failed: dave.tool\nnot imported: erin.quiet" {
 		t.Errorf("err = %v", err)
 	}
 	// No server is running, so erin.quiet could not be kept disabled.
-	if !strings.Contains(out, "erin.quiet    install") || !strings.Contains(out, "cannot restore: keeping the plugin disabled needs a running herdr server") {
+	if !strings.Contains(out, "erin.quiet    install") || !strings.Contains(out, "cannot import: keeping the plugin disabled needs a running herdr server") {
 		t.Errorf("the plan does not say why erin.quiet cannot be restored:\n%s", out)
 	}
 	if !strings.Contains(stderr, "build failed") {
 		t.Errorf("herdr's failure is not shown:\n%s", stderr)
 	}
-	for _, want := range []string{"dave.tool     failed", "carol.gadget  restored", "erin.quiet    not restored"} {
+	for _, want := range []string{"dave.tool     failed", "carol.gadget  imported", "erin.quiet    not imported"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the results lack %q:\n%s", want, out)
 		}
@@ -143,7 +143,7 @@ func TestRestoreReportsEachPlugin(t *testing.T) {
 func TestRestoreDeclinedChangesNothing(t *testing.T) {
 	h := newHarness(t)
 	file := writeExport(t, `{"id":"carol.gadget","enabled":true,"kind":"github","source":"carol/gadget","commit":"`+head+`"}`)
-	out, _, err := h.run("n\n", true, "restore", file)
+	out, _, err := h.run("n\n", true, "import", file)
 	if !errors.Is(err, errCancelled) || !strings.Contains(out, "Nothing was changed.") {
 		t.Errorf("declined: %v\n%s", err, out)
 	}
@@ -155,17 +155,17 @@ func TestRestoreDeclinedChangesNothing(t *testing.T) {
 func TestRestoreRefusesABadFileOrId(t *testing.T) {
 	h := newHarness(t)
 	file := writeExport(t, `{"id":"carol.gadget","enabled":true,"kind":"github","source":"carol/gadget","commit":"`+head+`"}`)
-	if _, _, err := h.run("", false, "restore", file, "o.nope"); err == nil || !strings.Contains(err.Error(), "does not list o.nope") {
+	if _, _, err := h.run("", false, "import", file, "o.nope"); err == nil || !strings.Contains(err.Error(), "does not list o.nope") {
 		t.Errorf("an id not in the export: %v", err)
 	}
-	if _, _, err := h.run("", false, "restore", file, "--exclude", "o.nope"); err == nil || !strings.Contains(err.Error(), "does not list o.nope") {
+	if _, _, err := h.run("", false, "import", file, "--exclude", "o.nope"); err == nil || !strings.Contains(err.Error(), "does not list o.nope") {
 		t.Errorf("an exclude not in the export: %v", err)
 	}
 	bad := filepath.Join(t.TempDir(), "bad.json")
 	if err := os.WriteFile(bad, []byte(`{"format":"hpm-plugins","version":9}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := h.run("", false, "restore", bad); err == nil || !strings.Contains(err.Error(), "from a newer hpm") {
+	if _, _, err := h.run("", false, "import", bad); err == nil || !strings.Contains(err.Error(), "from a newer hpm") {
 		t.Errorf("a newer file: %v", err)
 	}
 }
@@ -232,7 +232,7 @@ func TestRestoreDoesNotRunOverAChangeMadeAfterThePlan(t *testing.T) {
 	}}
 	c := &cli{m: h.m, in: in, out: &out, errOut: &errOut, interactive: true}
 	root := c.root(nil)
-	root.SetArgs([]string{"restore", file})
+	root.SetArgs([]string{"import", file})
 	err := root.ExecuteContext(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "changed since planned: carol.gadget") || !strings.Contains(err.Error(), "review the plan") {
 		t.Errorf("err = %v", err)

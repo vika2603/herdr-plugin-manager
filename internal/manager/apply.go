@@ -29,7 +29,7 @@ const (
 	KindPin       ChangeKind = "pin"
 	KindUnpin     ChangeKind = "unpin"
 	KindRollback  ChangeKind = "rollback"
-	KindRestore   ChangeKind = "restore"
+	KindRestore   ChangeKind = "import"
 	KindUninstall ChangeKind = "uninstall"
 )
 
