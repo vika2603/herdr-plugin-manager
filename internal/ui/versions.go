@@ -300,6 +300,10 @@ func (m *model) chooseVersion(d *detail, r pickRow) tea.Cmd {
 		// still returns to the picker.
 		child := *d
 		child.versions, child.parent = nil, d
+		if child.readme.loading {
+			// The README being read is d's; the copy reads its own.
+			child.readme = readme{}
+		}
 		m.detail = &child
 		return nil
 	}

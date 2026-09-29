@@ -64,6 +64,8 @@ func (m *model) switchView(d *detail) tea.Cmd {
 // readme is a detail screen's README and its rendering, which is kept until
 // the width or the theme changes.
 type readme struct {
+	// key is the source and ref the README is of, or is being read for.
+	key     string
 	loading bool
 	doc     *manager.Readme
 	err     error
@@ -102,6 +104,7 @@ func (m *model) loadRemoteReadme(d *detail, src source.GitHub, ref string) tea.C
 }
 
 func (m *model) loadReadme(d *detail, key string, read func() (*manager.Readme, error)) tea.Cmd {
+	d.readme.key = key
 	if c, ok := m.readmes[key]; ok {
 		d.readme.doc, d.readme.err = c.doc, c.err
 		return nil
@@ -120,12 +123,15 @@ func (m *model) onReadme(msg readmeMsg) {
 	if msg.err == nil || errors.Is(msg.err, manager.ErrNoReadme) {
 		m.readmes[msg.key] = cachedReadme{doc: msg.doc, err: msg.err}
 	}
-	if m.detail != msg.d {
+	// The detail that asked gets the README even when another screen is
+	// shown by now, so it is there on return, unless it has asked for
+	// another one since.
+	r := &msg.d.readme
+	if r.key != msg.key {
 		return
 	}
-	r := &msg.d.readme
 	r.loading, r.doc, r.err, r.lines = false, msg.doc, msg.err, nil
-	if errors.Is(msg.err, manager.ErrNoReadme) && msg.d.view == viewReadme {
+	if m.detail == msg.d && errors.Is(msg.err, manager.ErrNoReadme) && msg.d.view == viewReadme {
 		msg.d.view = viewInfo
 		m.setStatus("This plugin has no README", false)
 	}

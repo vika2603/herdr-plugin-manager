@@ -468,3 +468,31 @@ func TestBackRetracesTheWayIn(t *testing.T) {
 		t.Errorf("back did not leave the output")
 	}
 }
+
+// A README read for a preview arrives after the version picker has opened a
+// preview of another version: it is there when back returns to the first,
+// and the preview of the version already shown reads its own.
+func TestReadmeArrivingAfterLeavingItsPreviewIsShownOnReturn(t *testing.T) {
+	b := newFake()
+	b.preview.Ref, b.preview.DefaultBranch = "v1.1.0", "main"
+	b.preview.Releases = []string{"v1.1.0", "v1.0.0"}
+	h := start(t, b)
+	h.press("tab", "enter")
+	_, readme := h.m.Update(keyMsg("tab"))
+	h.press("v", "down", "enter")
+	h.run(readme)
+	h.press("esc", "esc", "tab")
+	if out := h.screen(); !strings.Contains(out, "Does gadget things.") {
+		t.Errorf("the README read before the version was chosen is not shown on return:\n%s", out)
+	}
+
+	h = start(t, b)
+	h.press("tab", "enter")
+	_, readme = h.m.Update(keyMsg("tab"))
+	h.press("v", "enter")
+	h.run(readme)
+	h.press("tab")
+	if out := h.screen(); !strings.Contains(out, "Does gadget things.") {
+		t.Errorf("the preview of the version already shown is stuck reading its README:\n%s", out)
+	}
+}
