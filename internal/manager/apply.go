@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -208,6 +207,18 @@ var ErrKeepDisabled = errors.New("keeping the plugin disabled needs a running he
 // could not be read back, so what is installed is not known.
 var ErrUnconfirmed = errors.New("herdr reported success, but the plugin list could not be read afterwards, so the change is not confirmed")
 
+// ErrCancelled is returned for a change stopped before it finished. herdr
+// is interrupted, and the outcome says where the plugin stands.
+var ErrCancelled = errors.New("cancelled")
+
+// cancelled marks err as a cancellation when ctx ended while it ran.
+func cancelled(ctx context.Context, err error) error {
+	if err == nil || ctx.Err() == nil {
+		return err
+	}
+	return fmt.Errorf("%w: %w", ErrCancelled, err)
+}
+
 // afterTimeout bounds reading the plugin list after a change, which runs
 // even when the change was cancelled.
 const afterTimeout = 10 * time.Second
@@ -256,7 +267,7 @@ func (m *Manager) Apply(ctx context.Context, c Change, out io.Writer) Outcome {
 	done := func() Outcome {
 		entry.After, entry.AfterUnknown = o.After, o.AfterUnknown
 		if o.Err != nil {
-			entry.Error = o.Err.Error()
+			entry.Error, entry.Cancelled = o.Err.Error(), errors.Is(o.Err, ErrCancelled)
 			if logFile != nil {
 				fmt.Fprintf(logFile, "\n%s\n", o.Error())
 			}
@@ -282,7 +293,7 @@ func (m *Manager) Apply(ctx context.Context, c Change, out io.Writer) Outcome {
 	if ask == "" {
 		ask = c.Target.Ref
 	}
-	installErr := m.CLI.Install(ctx, c.Target.Source.String(), ask, out)
+	installErr := cancelled(ctx, m.CLI.Install(ctx, c.Target.Source.String(), ask, out))
 
 	// The record is read even when ctx was cancelled, to say where the
 	// plugin stands.
@@ -329,7 +340,8 @@ func (m *Manager) recordAfter(ctx context.Context, c Change, asked string) (afte
 	if s.Source == c.Target.Source.String() && s.Ref == asked && s.Commit == c.Target.Commit && updates.IsCommit(asked) {
 		var f *Follow
 		if c.Target.Ref != asked {
-			f = &Follow{Source: s.Source, Ref: c.Target.Ref, Commit: asked}
+			f = &Follow{Source: s.Source, Ref: c.Target.Ref, Commit: asked,
+				Installed: after.Source.ValueOrZero().InstalledUnixMs.ValueOrZero()}
 		}
 		if err := m.History.setFollow(c.ID, f); err != nil {
 			followErr = followError(c.ID, c.Target.Ref, asked, err)
@@ -434,25 +446,19 @@ func (m *Manager) ping(ctx context.Context) error {
 }
 
 // openLog creates the file the change's output is kept in, giving the entry
-// its id. A log that cannot be created is left out.
+// its time and id. A log that cannot be created is left out.
 func (m *Manager) openLog(e *Entry) (f *os.File, path string) {
 	h := m.History
 	if h == nil || h.Dir == "" {
 		return nil, ""
 	}
 	e.Time = time.Now()
-	e.ID = entryID(e.Time)
-	if err := os.MkdirAll(h.logDir(), 0o700); err != nil {
-		return nil, ""
-	}
-	path = filepath.Join(h.logDir(), e.ID+".log")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600) //nolint:gosec // A new file named by the entry id in the history directory.
-	if err != nil {
+	f = h.reserve(e)
+	if f == nil {
 		return nil, ""
 	}
 	fmt.Fprintf(f, "%s %s %s at %s\n\n", e.Time.Format(time.DateTime), e.Kind, e.Plugin, targetLabel(e.Target))
-	e.Log = path
-	return f, path
+	return f, e.Log
 }
 
 func targetLabel(t *TargetRecord) string {
@@ -485,7 +491,14 @@ func (m *Manager) uninstall(ctx context.Context, kind ChangeKind, id string, out
 		s := StateOf(*current)
 		o.Before = &s
 	}
-	err := m.CLI.Uninstall(ctx, id, out)
+	entry := Entry{Kind: kind, Plugin: id, Before: o.Before}
+	logFile, logPath := m.openLog(&entry)
+	if logFile != nil {
+		defer func() { _ = logFile.Close() }()
+		out = io.MultiWriter(out, logFile)
+		o.Log = logPath
+	}
+	err := cancelled(ctx, m.CLI.Uninstall(ctx, id, out))
 	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), afterTimeout)
 	defer cancel()
 	after, readErr := m.find(readCtx, id)
@@ -501,13 +514,16 @@ func (m *Manager) uninstall(ctx context.Context, kind ChangeKind, id string, out
 		}
 	default:
 		if ferr := m.History.setFollow(id, nil); ferr != nil {
-			fmt.Fprintf(out, "warning: could not forget the ref %s followed: %v\n", id, ferr)
+			err = errors.Join(err, fmt.Errorf("herdr removed %s, but the ref it followed could not be forgotten: %w", id, ferr))
 		}
 	}
 	o.Err = err
-	entry := Entry{Kind: kind, Plugin: id, Before: o.Before, After: o.After, AfterUnknown: o.AfterUnknown}
+	entry.After, entry.AfterUnknown = o.After, o.AfterUnknown
 	if err != nil {
-		entry.Error = err.Error()
+		entry.Error, entry.Cancelled = err.Error(), errors.Is(err, ErrCancelled)
+		if logFile != nil {
+			fmt.Fprintf(logFile, "\n%s\n", o.Error())
+		}
 	}
 	if herr := m.History.add(&entry); herr != nil {
 		fmt.Fprintf(out, "warning: could not record the change in the history: %v\n", herr)

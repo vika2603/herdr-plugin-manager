@@ -27,6 +27,9 @@ type Follow struct {
 	// pin herdr recorded for it.
 	Ref    string `json:"ref"`
 	Commit string `json:"commit"`
+	// Installed is when herdr recorded the install, which it sets anew on
+	// every install; 0 when herdr did not say.
+	Installed uint64 `json:"installed_unix_ms,omitempty"`
 }
 
 func (h *History) followsPath() string { return filepath.Join(h.Dir, followsFile) }
@@ -87,7 +90,8 @@ func (h *History) setFollow(id string, f *Follow) error {
 
 // applyFollows gives each plugin that is still at the pin this manager made
 // the ref it follows. A plugin herdr now records otherwise, as after an
-// install outside this manager, keeps herdr's record.
+// install outside this manager, keeps herdr's record; so does one installed
+// again at the same pin, which herdr records with a new install time.
 func applyFollows(plugins []herdr.InstalledPluginInfo, follows map[string]Follow) {
 	for i := range plugins {
 		p := &plugins[i]
@@ -95,7 +99,8 @@ func applyFollows(plugins []herdr.InstalledPluginInfo, follows map[string]Follow
 		src, github := source.FromInstalled(*p)
 		info := p.Source.ValueOrZero()
 		if !ok || !github || src.String() != f.Source ||
-			info.RequestedRef.ValueOrZero() != f.Commit || info.ResolvedCommit.ValueOrZero() != f.Commit {
+			info.RequestedRef.ValueOrZero() != f.Commit || info.ResolvedCommit.ValueOrZero() != f.Commit ||
+			f.Installed != 0 && info.InstalledUnixMs.ValueOrZero() != f.Installed {
 			continue
 		}
 		if f.Ref == "" {

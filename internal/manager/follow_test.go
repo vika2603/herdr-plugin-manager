@@ -151,3 +151,66 @@ func TestConcurrentUpdatesByTwoManagersKeepBothFollows(t *testing.T) {
 		}
 	}
 }
+
+func TestUninstallWhoseFollowCannotBeForgottenFails(t *testing.T) {
+	r := newRegistry(t, true, "", at(commitV2, commitV2, true))
+	if err := r.m.History.setFollow("o.r", &Follow{Source: src.String(), Ref: "v2.0.0", Commit: commitV2}); err != nil {
+		t.Fatal(err)
+	}
+	blockFollows(t, r.m.History)
+	r.installs()
+	cli, _ := fakeHerdr(t, `case "$*" in
+"plugin uninstall "*) cp `+r.next+` `+r.file+` ;;
+esac`)
+	r.m.CLI = cli
+	err := r.m.Uninstall(context.Background(), "o.r", nil)
+	if err == nil || !strings.Contains(err.Error(), "could not be forgotten") {
+		t.Fatalf("err = %v, want the follow left behind reported", err)
+	}
+	if !strings.Contains(err.Error(), "no longer installed") {
+		t.Errorf("the error does not say the plugin was removed: %v", err)
+	}
+}
+
+// pinnedAt is o.r pinned to commit, installed at ms.
+func pinnedAt(commit string, ms uint64) herdr.InstalledPluginInfo {
+	p := at(commit, commit, true)
+	info := p.Source.ValueOrZero()
+	info.InstalledUnixMs = herdr.Some(ms)
+	p.Source = herdr.Some(info)
+	return p
+}
+
+func TestFollowIsOnlyOfTheInstallItWasKeptFor(t *testing.T) {
+	follows := map[string]Follow{"o.r": {Source: src.String(), Ref: "v2.0.0", Commit: commitV2, Installed: 100}}
+	list := []herdr.InstalledPluginInfo{pinnedAt(commitV2, 100)}
+	applyFollows(list, follows)
+	if k := TrackingOf(list[0]).Kind; k != TrackRelease {
+		t.Errorf("the install the follow was kept for is %s, want it following the release", k)
+	}
+	// herdr installed it again at the same pin, outside this manager.
+	list = []herdr.InstalledPluginInfo{pinnedAt(commitV2, 200)}
+	applyFollows(list, follows)
+	if k := TrackingOf(list[0]).Kind; k != TrackPinned {
+		t.Errorf("a later install at the same pin is %s, want it pinned as herdr records", k)
+	}
+}
+
+func TestUpdateKeepsTheInstallTimeOfItsFollow(t *testing.T) {
+	r := newRegistry(t, true, "", at("v1.0.0", commitV1, true))
+	r.m.Git = releases
+	r.installs(pinnedAt(commitV2, 1234))
+	current := at("v1.0.0", commitV1, true)
+	o := r.m.Apply(context.Background(), Change{Kind: KindUpdate, ID: "o.r", Current: &current,
+		Target: Target{Source: src, Ref: "v2.0.0", Commit: commitV2}}, nil)
+	if o.Err != nil {
+		t.Fatal(o.Err)
+	}
+	follows, err := r.m.History.follows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := follows["o.r"]; f.Installed != 1234 || f.Ref != "v2.0.0" {
+		t.Errorf("follow = %+v, want v2.0.0 for the install at 1234", f)
+	}
+}

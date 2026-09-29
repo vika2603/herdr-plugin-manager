@@ -546,11 +546,17 @@ func (c *cli) pending(checked []manager.Checked, named bool, exclude []string) [
 }
 
 // applyReviews applies the reviewed updates that can run, returning which
-// failed, or an error when the run had to stop.
+// failed, or an error when the run had to stop. Once ctx is cancelled, as by
+// ctrl+c, the updates not yet started are not run.
 func (c *cli) applyReviews(ctx context.Context, reviews []manager.Review, yes bool) (failed, stop error) {
-	var ids []string
+	var ids, notRun []string
 	for _, r := range reviews {
-		if !r.Ready() {
+		id := r.Checked.Plugin.PluginID
+		switch {
+		case !r.Ready():
+			continue
+		case ctx.Err() != nil:
+			notRun = append(notRun, id)
 			continue
 		}
 		ok, err := c.applyReview(ctx, r, yes)
@@ -558,13 +564,17 @@ func (c *cli) applyReviews(ctx context.Context, reviews []manager.Review, yes bo
 			return nil, err
 		}
 		if !ok {
-			ids = append(ids, r.Checked.Plugin.PluginID)
+			ids = append(ids, id)
 		}
 	}
+	var errs []error
 	if len(ids) > 0 {
-		return fmt.Errorf("not updated: %s", strings.Join(ids, ", ")), nil
+		errs = append(errs, fmt.Errorf("not updated: %s", strings.Join(ids, ", ")))
 	}
-	return nil, nil
+	if len(notRun) > 0 {
+		errs = append(errs, fmt.Errorf("%w; not started: %s", manager.ErrCancelled, strings.Join(notRun, ", ")))
+	}
+	return errors.Join(errs...), nil
 }
 
 // printPlan lists the updates about to be reviewed, one line each.
@@ -828,14 +838,7 @@ func (c *cli) historyCmd() *cobra.Command {
 			tw := c.table()
 			fmt.Fprintln(tw, "ENTRY\tTIME\tKIND\tPLUGIN\tRESULT\tCHANGE")
 			for _, e := range entries {
-				result := "done"
-				switch {
-				case e.AfterUnknown:
-					result = "unconfirmed"
-				case e.Failed():
-					result = "failed"
-				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", e.ID, e.Time.Local().Format(time.DateTime), e.Kind, e.Plugin, result, change(e))
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", e.ID, e.Time.Local().Format(time.DateTime), e.Kind, e.Plugin, e.Result(), change(e))
 			}
 			return tw.Flush()
 		},

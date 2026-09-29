@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -48,8 +49,10 @@ type Entry struct {
 	Before       *State `json:"before,omitempty"`
 	After        *State `json:"after,omitempty"`
 	AfterUnknown bool   `json:"after_unknown,omitempty"`
-	// Error is why the change failed, empty when it succeeded.
-	Error string `json:"error,omitempty"`
+	// Error is why the change failed, empty when it succeeded; Cancelled is
+	// set when it was stopped.
+	Error     string `json:"error,omitempty"`
+	Cancelled bool   `json:"cancelled,omitempty"`
 	// Log is the file holding everything herdr printed during the change.
 	Log string `json:"log,omitempty"`
 }
@@ -64,19 +67,33 @@ type TargetRecord struct {
 // Failed reports whether the change failed.
 func (e Entry) Failed() bool { return e.Error != "" }
 
+// Result is how the change ended, in a word: done, failed, cancelled, or
+// unconfirmed when the plugin's state afterwards is not known.
+func (e Entry) Result() string {
+	switch {
+	case e.AfterUnknown:
+		return "unconfirmed"
+	case e.Cancelled:
+		return "cancelled"
+	case e.Failed():
+		return "failed"
+	}
+	return "done"
+}
+
 // add appends e to the log, giving it an id and a time when it has none.
+// An entry without an id gets one, and the empty log file that holds it.
 func (h *History) add(e *Entry) error {
 	if h == nil || h.Dir == "" {
 		return nil
 	}
+	if e.ID == "" {
+		if f := h.reserve(e); f != nil {
+			_ = f.Close()
+		}
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if e.Time.IsZero() {
-		e.Time = time.Now()
-	}
-	if e.ID == "" {
-		e.ID = entryID(e.Time)
-	}
 	line, err := json.Marshal(e)
 	if err != nil {
 		return err
@@ -98,23 +115,39 @@ func (h *History) add(e *Entry) error {
 	return h.trim(path)
 }
 
-var (
-	idMu   sync.Mutex
-	lastID string
-	idSeq  int
-)
+// idTries bounds the ids tried for one moment before falling back to one
+// with the process id.
+const idTries = 1000
 
-// entryID is unique within this process and sorts by time.
-func entryID(t time.Time) string {
-	idMu.Lock()
-	defer idMu.Unlock()
-	base := t.UTC().Format("20060102T150405.000")
-	if base == lastID {
-		idSeq++
-	} else {
-		lastID, idSeq = base, 0
+var fallbackSeq atomic.Int64
+
+// reserve gives e its time, unless it has one, and an id no other entry
+// has, even one another process records in the same millisecond. The id is
+// taken by creating the entry's log file, which only one process can do;
+// the file is returned open for the change's output. When no log file can
+// be created, it returns nil and the id carries the process id instead.
+func (h *History) reserve(e *Entry) *os.File {
+	if e.Time.IsZero() {
+		e.Time = time.Now()
 	}
-	return fmt.Sprintf("%s-%d", base, idSeq)
+	base := e.Time.UTC().Format("20060102T150405.000")
+	if err := os.MkdirAll(h.logDir(), 0o700); err == nil {
+		for seq := range idTries {
+			id := fmt.Sprintf("%s-%d", base, seq)
+			path := filepath.Join(h.logDir(), id+".log")
+			f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600) //nolint:gosec // A new file named by the entry id in the history directory.
+			if errors.Is(err, fs.ErrExist) {
+				continue
+			}
+			if err != nil {
+				break
+			}
+			e.ID, e.Log = id, path
+			return f
+		}
+	}
+	e.ID = fmt.Sprintf("%s-p%d.%d", base, os.Getpid(), fallbackSeq.Add(1))
+	return nil
 }
 
 // trim cuts the log back once it has grown past historyMax entries,
