@@ -365,3 +365,22 @@ func TestFiltersChoosePluginsByState(t *testing.T) {
 		t.Errorf("-is:installed shows %d listings, want none", len(got))
 	}
 }
+
+// A restore or rollback that only enabled or disabled a plugin records no
+// target; retrying it sets the state again rather than taking it for an
+// uninstall.
+func TestRetryOfAnEnabledStateChangeSetsTheStateAgain(t *testing.T) {
+	b := newFake()
+	disabled := &manager.State{Version: "1.0.0", Source: "o/beta", Ref: "v1.0.0", Commit: "c0"}
+	b.history = []manager.Entry{{ID: "1", Time: time.Now(), Kind: manager.KindRestore, Plugin: "beta",
+		Before: disabled, After: disabled, Error: "herdr server is not running"}}
+	h := start(t, b)
+	h.press("H", "enter")
+	if out := h.words(); strings.Contains(out, "uninstall") || !strings.Contains(out, "r retry") {
+		t.Fatalf("the entry does not offer to set the state again:\n%s", out)
+	}
+	h.press("r")
+	if !slices.Contains(b.Calls(), "set-enabled beta true") {
+		t.Errorf("calls = %q, want beta enabled again", b.Calls())
+	}
+}

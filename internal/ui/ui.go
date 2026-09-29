@@ -283,6 +283,7 @@ var changeVerbs = map[manager.ChangeKind][3]string{
 	manager.KindPin:       {"pin", "Pinning", "Pin"},
 	manager.KindUnpin:     {"unpin", "Unpinning", "Unpin"},
 	manager.KindReinstall: {"reinstall", "Reinstalling", "Reinstall"},
+	manager.KindRestore:   {"restore", "Restoring", "Restore"},
 }
 
 type confirm struct {

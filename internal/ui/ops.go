@@ -335,6 +335,19 @@ func (m *model) retryEntry(e manager.Entry) func() tea.Cmd {
 			return nil
 		}
 		return func() tea.Cmd { return m.rollback(p) }
+	case e.Target == nil && e.Before != nil && e.After != nil && e.Before.SameRevision(*e.After):
+		// The change only enabled or disabled the plugin.
+		if !installed {
+			return nil
+		}
+		want := !e.Before.Enabled
+		return func() tea.Cmd {
+			if current := m.current(p); current.Enabled != want {
+				return m.toggle(current)
+			}
+			m.setStatus(e.Plugin+" is already "+strings.ToLower(enabledWord(want)), false)
+			return nil
+		}
 	case e.Target == nil:
 		return nil
 	}
