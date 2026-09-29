@@ -694,6 +694,7 @@ func (m *model) previewLines(p *manager.Preview) []string {
 	if p.Existing != nil {
 		rows = append(rows, field{"replaces", t.text.Render(p.Existing.Version) + t.faint.Render(" from "+manager.SourceLabel(*p.Existing))})
 	}
+	rows = append(rows, field{"updates", t.fg2.Render(safe.Line(manager.TrackingAt(p.Ref, p.Commit).Describe()))})
 	out = append(out, m.fields(rows)...)
 	out = append(out, m.problems(p.Problems)...)
 	if len(p.Warnings) > 0 {
@@ -767,6 +768,7 @@ func (m *model) installedDetail(d *detail) []string {
 	if v := p.MinHerdrVersion.ValueOrZero(); v != "" {
 		rows = append(rows, field{"needs", t.text.Render("herdr ≥ " + v)})
 	}
+	rows = append(rows, field{"updates", t.fg2.Render(safe.Line(manager.TrackingOf(p).Describe())) + t.faint.Render(m.keyHint(actVersion, "for versions"))})
 	if ch, ok := m.checks[p.PluginID]; ok {
 		var value string
 		switch {

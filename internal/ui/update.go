@@ -82,6 +82,8 @@ func (m *model) result(msg tea.Msg) (tea.Cmd, bool) {
 		m.onIndex(msg)
 	case rollbackMsg:
 		return m.onRollback(msg), true
+	case versionsMsg:
+		return m.onVersions(msg), true
 	case checksMsg:
 		if msg.gen != m.checkGen {
 			break
@@ -449,6 +451,11 @@ func (m *model) keyDetail(k string) (tea.Model, tea.Cmd) {
 			return m, nil
 		case actRollback:
 			return m, m.rollback(p)
+		case actVersion:
+			if d.loading || !m.idle() {
+				return m, nil
+			}
+			return m, m.openInstalledVersions(d)
 		case actReload:
 			return m, m.loadLogs(p.PluginID)
 		default:
@@ -476,8 +483,12 @@ func (m *model) keyDetail(k string) (tea.Model, tea.Cmd) {
 	if !m.idle() {
 		return m, nil
 	}
-	if d.change != nil {
-		return m, m.withSpinner(m.applyChange(*d.change))
+	if c := d.change; c != nil {
+		change := *c
+		if change.fromPreview {
+			change.target.Ref, change.target.Commit = d.preview.Ref, d.preview.Commit
+		}
+		return m, m.withSpinner(m.applyChange(change))
 	}
 	target := *d.install
 	target.ref, target.commit = d.preview.Ref, d.preview.Commit

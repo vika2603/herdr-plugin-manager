@@ -80,6 +80,7 @@ func (c *cli) root(tui TUI) *cobra.Command {
 	root.AddCommand(
 		c.listCmd(), c.searchCmd(), c.infoCmd(), c.installCmd(), c.uninstallCmd(),
 		c.enableCmd(true), c.enableCmd(false), c.outdatedCmd(), c.updateCmd(), c.rollbackCmd(), c.historyCmd(),
+		c.versionCmd(manager.KindSwitch), c.versionCmd(manager.KindPin), c.versionCmd(manager.KindUnpin), c.versionCmd(manager.KindReinstall),
 		c.logsCmd(), c.keysCmd(),
 	)
 	return root
@@ -277,7 +278,7 @@ func (c *cli) printInstalled(ctx context.Context, p herdr.InstalledPluginInfo) {
 		if err != nil {
 			line = "check failed: " + safe.Line(err.Error())
 		}
-		sections = append(sections, manager.Section{Title: "Update", Lines: []string{line}})
+		sections = append(sections, manager.Section{Title: "Update", Lines: []string{line, "updates: " + safe.Line(manager.TrackingOf(p).Describe())}})
 	}
 	printSections(c.out, sections)
 }
@@ -519,7 +520,7 @@ func (c *cli) updateCmd() *cobra.Command {
 func (c *cli) updateOne(ctx context.Context, ch manager.Checked, herdrVersion string, yes bool) (bool, error) {
 	id := ch.Plugin.PluginID
 	fmt.Fprintf(c.out, "\n%s: %s\n", id, ch.Result.Describe())
-	preview, err := c.m.Preview(ctx, ch.Result.Source, ch.Result.TargetCommit, "", herdrVersion, nil)
+	preview, err := c.m.PreviewAt(ctx, ch.Result.Source, ch.Result.TargetRef, ch.Result.TargetCommit, herdrVersion, nil)
 	if err != nil {
 		fmt.Fprintf(c.errOut, "%v\n", err)
 		return false, nil
@@ -558,6 +559,100 @@ func (c *cli) report(o manager.Outcome) error {
 	return nil
 }
 
+// versionCmds describe the commands that move an installed plugin to
+// another version or change how it follows new ones.
+var versionCmds = map[manager.ChangeKind]struct {
+	use, short, long string
+	args             cobra.PositionalArgs
+}{
+	manager.KindSwitch: {
+		"switch <plugin-id> <ref>", "Install another version of a plugin: a release, a branch or a commit",
+		"Reinstall a plugin at ref, which it then follows: a release tag follows newer\n" +
+			"releases, a branch or another tag follows it when it moves, and a commit is a\n" +
+			"pin with no updates. An older release downgrades the plugin.",
+		cobra.ExactArgs(2),
+	},
+	manager.KindPin: {
+		"pin <plugin-id>", "Hold a plugin at the commit it is installed at",
+		"Reinstall a plugin at the commit it is installed at, recorded as a pin, so that\n" +
+			"it has no updates until it is unpinned.",
+		cobra.ExactArgs(1),
+	},
+	manager.KindUnpin: {
+		"unpin <plugin-id> [ref]", "Let a pinned plugin follow a release, branch or tag again",
+		"Reinstall a pinned plugin at ref, which it then follows. Without ref it follows\n" +
+			"what an install picks: the latest release of a plugin at the repository root,\n" +
+			"else the default branch. The version installed is where that ref is now.",
+		cobra.RangeArgs(1, 2),
+	},
+	manager.KindReinstall: {
+		"reinstall <plugin-id>", "Reinstall a plugin at the version it is installed at",
+		"Reinstall a plugin from the ref it was installed from, running its build\n" +
+			"commands again. It is refused when that ref has moved on, since reinstalling\n" +
+			"it would update the plugin; pin the plugin to reinstall the installed commit.",
+		cobra.ExactArgs(1),
+	},
+}
+
+// versionCmd is the command for a version change. Like an update, it
+// shows the manifest it installs first and keeps the plugin enabled or
+// disabled.
+func (c *cli) versionCmd(kind manager.ChangeKind) *cobra.Command {
+	d := versionCmds[kind]
+	var yes bool
+	cmd := &cobra.Command{
+		Use: d.use, Short: d.short, Long: d.long, Args: d.args,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			id := args[0]
+			p, err := c.m.Find(ctx, id)
+			if err != nil {
+				return err
+			}
+			if p == nil {
+				return fmt.Errorf("plugin %q is not installed", id)
+			}
+			var ref string
+			if len(args) > 1 {
+				ref = args[1]
+			}
+			if ref, err = manager.VersionRef(*p, kind, ref); err != nil {
+				return err
+			}
+			src, _ := source.FromInstalled(*p)
+			preview, err := c.m.Preview(ctx, src, ref, "", c.m.HerdrVersion(ctx), nil)
+			if err != nil {
+				return err
+			}
+			preview.RequireID(id)
+			if kind == manager.KindReinstall {
+				preview.RequireInstalledCommit(*p)
+			}
+			fmt.Fprintf(c.out, "%s now: %s; %s\n\n", id, manager.StateOf(*p), manager.TrackingOf(*p).Describe())
+			printSections(c.out, preview.Sections())
+			if len(preview.Problems) > 0 {
+				return fmt.Errorf("not changing %s: see the problems above", id)
+			}
+			if err := c.confirm(yes, fmt.Sprintf("%s %s?", capitalize(string(kind)), id)); err != nil {
+				return err
+			}
+			return c.report(c.m.Apply(ctx, manager.Change{
+				Kind: kind, ID: id, Current: p,
+				Target: manager.Target{Source: src, Ref: preview.Ref, Commit: preview.Commit},
+			}, c.out))
+		},
+	}
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "go ahead without asking")
+	return cmd
+}
+
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
 func (c *cli) rollbackCmd() *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
@@ -580,7 +675,7 @@ func (c *cli) rollbackCmd() *cobra.Command {
 			if u.Remove {
 				question = "Uninstall " + args[0] + "?"
 			} else {
-				preview, err := c.m.Preview(ctx, u.Target.Source, u.Target.Commit, "", c.m.HerdrVersion(ctx), nil)
+				preview, err := c.m.PreviewAt(ctx, u.Target.Source, u.Target.Ref, u.Target.Commit, c.m.HerdrVersion(ctx), nil)
 				if err != nil {
 					return err
 				}
@@ -644,7 +739,10 @@ func (c *cli) historyCmd() *cobra.Command {
 			fmt.Fprintln(tw, "ENTRY\tTIME\tKIND\tPLUGIN\tRESULT\tCHANGE")
 			for _, e := range entries {
 				result := "done"
-				if e.Failed() {
+				switch {
+				case e.AfterUnknown:
+					result = "unconfirmed"
+				case e.Failed():
 					result = "failed"
 				}
 				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", e.ID, e.Time.Local().Format(time.DateTime), e.Kind, e.Plugin, result, change(e))

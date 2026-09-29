@@ -310,6 +310,18 @@ func (m *Manager) Preview(ctx context.Context, src source.GitHub, ref, hint, her
 	return p, nil
 }
 
+// PreviewAt reads the manifest at commit for an install that asks herdr for
+// ref, which resolved to commit when the change was chosen, as for an update
+// a check found. The install is refused if ref has moved on since.
+func (m *Manager) PreviewAt(ctx context.Context, src source.GitHub, ref, commit, herdrVersion string, installed []herdr.InstalledPluginInfo) (*Preview, error) {
+	p, err := m.Preview(ctx, src, commit, "", herdrVersion, installed)
+	if err != nil {
+		return nil, err
+	}
+	p.Ref = ref
+	return p, nil
+}
+
 // target is what an install checks out.
 type target struct {
 	ref, commit string

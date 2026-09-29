@@ -78,7 +78,8 @@ func (p *Preview) Sections() []Section {
 	if m.Description != "" {
 		summary = append(summary, m.Description)
 	}
-	summary = append(summary, "platforms: "+platformList(m.Platforms), "min herdr: "+m.MinHerdrVersion)
+	summary = append(summary, "platforms: "+platformList(m.Platforms), "min herdr: "+m.MinHerdrVersion,
+		"updates: "+TrackingAt(p.Ref, p.Commit).Describe())
 	if len(p.Releases) > 0 {
 		summary = append(summary, "releases: "+firstFew(p.Releases, 5))
 	}

@@ -37,6 +37,8 @@ type Backend interface {
 	Apply(ctx context.Context, c manager.Change, out io.Writer) manager.Outcome
 	Uninstall(ctx context.Context, id string, out io.Writer) error
 	PlanRollback(ctx context.Context, id string) (manager.Undo, error)
+	Versions(ctx context.Context, src source.GitHub) (manager.Versions, error)
+	PreviewAt(ctx context.Context, src source.GitHub, ref, commit, herdrVersion string, installed []herdr.InstalledPluginInfo) (*manager.Preview, error)
 	Rollback(ctx context.Context, u manager.Undo, out io.Writer) manager.Outcome
 	CheckAll(ctx context.Context, plugins []herdr.InstalledPluginInfo) []manager.Checked
 	Index(ctx context.Context, refresh bool) (*market.Index, market.Status, error)
@@ -214,15 +216,22 @@ type pendingChange struct {
 	target manager.Target
 	// note says what the change does beyond the manifest shown.
 	note string
+	// fromPreview is set for a change whose target is what its preview
+	// resolved; the others preview the commit their target already names.
+	fromPreview bool
 	// undo is the rollback a rollback applies.
 	undo *manager.Undo
 }
 
-// changeVerbs are how a change is named: the key's description and the
-// progress title.
-var changeVerbs = map[manager.ChangeKind][2]string{
-	manager.KindUpdate:   {"update", "Updating"},
-	manager.KindRollback: {"roll back", "Rolling back"},
+// changeVerbs are how a change is named: the key's description, the
+// progress title and the preview's title.
+var changeVerbs = map[manager.ChangeKind][3]string{
+	manager.KindUpdate:    {"update", "Updating", "Update"},
+	manager.KindRollback:  {"roll back", "Rolling back", "Roll back"},
+	manager.KindSwitch:    {"switch", "Switching", "Switch"},
+	manager.KindPin:       {"pin", "Pinning", "Pin"},
+	manager.KindUnpin:     {"unpin", "Unpinning", "Unpin"},
+	manager.KindReinstall: {"reinstall", "Reinstalling", "Reinstall"},
 }
 
 type confirm struct {
@@ -396,16 +405,26 @@ func (m *model) loadLogs(id string) tea.Cmd {
 	}
 }
 
+// loadPreview reads the manifest an install of src at ref would bring in. A
+// change that names its commit previews that commit.
 func (m *model) loadPreview(d *detail, src source.GitHub, ref, hint string) tea.Cmd {
 	version, installed := m.herdrVersion, m.installed
-	var requireID string
-	if d.change != nil {
-		requireID = d.change.plugin.PluginID
-	}
+	c := d.change
 	return func() tea.Msg {
-		p, err := m.b.Preview(m.ctx, src, ref, hint, version, installed)
-		if err == nil && requireID != "" {
-			p.RequireID(requireID)
+		var (
+			p   *manager.Preview
+			err error
+		)
+		if c != nil && !c.fromPreview {
+			p, err = m.b.PreviewAt(m.ctx, src, c.target.Ref, c.target.Commit, version, installed)
+		} else {
+			p, err = m.b.Preview(m.ctx, src, ref, hint, version, installed)
+		}
+		if err == nil && c != nil {
+			p.RequireID(c.plugin.PluginID)
+			if c.kind == manager.KindReinstall {
+				p.RequireInstalledCommit(c.plugin)
+			}
 		}
 		return previewMsg{d: d, preview: p, err: err}
 	}

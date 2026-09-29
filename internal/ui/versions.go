@@ -7,20 +7,29 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/vika2603/herdr-client/herdr"
 
+	"github.com/vika2603/herdr-plugin-manager/internal/manager"
 	"github.com/vika2603/herdr-plugin-manager/internal/market"
 	"github.com/vika2603/herdr-plugin-manager/internal/safe"
+	"github.com/vika2603/herdr-plugin-manager/internal/source"
 	"github.com/vika2603/herdr-plugin-manager/internal/updates"
 )
 
-// versionPicker lists what an install preview can switch to: the release
-// tags, the newest first, then the default branch by name. Beside the list
-// are the release notes of the selected version.
+// versionPicker lists the versions a plugin can be installed at: the release
+// tags, the newest first, then the default branch by name. For an installed
+// plugin, reinstalling it and pinning or unpinning it follow. Beside the
+// list are the release notes of the selected version.
 type versionPicker struct {
-	refs   []string
+	rows   []pickRow
+	src    source.GitHub
 	cursor int
-	// offset is the first version in view, notesOffset the first line of
-	// notes.
+	// releases are the release tags, for the latest mark.
+	releases []string
+	// current is the ref the preview shows, or the plugin is installed from,
+	// marked with currentMark.
+	current, currentMark string
+	// offset is the first row in view, notesOffset the first line of notes.
 	offset, notesOffset int
 	// listWidth is the list column's width at the last render, for clicks.
 	listWidth int
@@ -31,18 +40,37 @@ type versionPicker struct {
 	renderedWidth int
 }
 
+// pickRow is a version, or with kind set a change to the installed plugin
+// that is not a version of its own.
+type pickRow struct {
+	ref string
+	// branch marks the default branch.
+	branch bool
+	kind   manager.ChangeKind
+	label  string
+	about  string
+}
+
 // cachedReleases is a repository's releases read earlier in the session.
 type cachedReleases struct {
 	list []market.Release
 	err  error
 }
 
-type releasesMsg struct {
-	d    *detail
-	key  string
-	list []market.Release
-	err  error
-}
+type (
+	releasesMsg struct {
+		d    *detail
+		key  string
+		list []market.Release
+		err  error
+	}
+	// versionsMsg is what an installed plugin's repository offers.
+	versionsMsg struct {
+		d        *detail
+		versions manager.Versions
+		err      error
+	}
+)
 
 const (
 	// minNotesWidth is the narrowest notes column worth drawing.
@@ -51,33 +79,106 @@ const (
 	columnGap = 3
 )
 
-// openVersions opens the picker on the version the preview shows, and reads
-// the repository's release notes unless they were read before.
+// versionRows are the release tags and the default branch.
+func versionRows(releases []string, defaultBranch string) []pickRow {
+	rows := make([]pickRow, 0, len(releases)+1)
+	for _, tag := range releases {
+		rows = append(rows, pickRow{ref: tag})
+	}
+	if defaultBranch != "" {
+		rows = append(rows, pickRow{ref: defaultBranch, branch: true})
+	}
+	return rows
+}
+
+// openVersions opens the picker of an install preview on the version it
+// shows.
 func (m *model) openVersions(d *detail) tea.Cmd {
 	p := d.preview
 	if d.install == nil || p == nil || len(p.Releases) == 0 && p.DefaultBranch == "" {
 		m.setStatus("No other versions to choose from", false)
 		return nil
 	}
-	vp := &versionPicker{refs: append([]string(nil), p.Releases...), rendered: map[string][]string{}}
-	if p.DefaultBranch != "" {
-		vp.refs = append(vp.refs, p.DefaultBranch)
+	vp := &versionPicker{
+		rows: versionRows(p.Releases, p.DefaultBranch), src: d.install.src, releases: p.Releases,
+		current: shownRef(d), currentMark: "shown",
 	}
-	shown := shownRef(d)
-	for i, ref := range vp.refs {
-		if ref == shown {
+	return m.showPicker(d, vp)
+}
+
+// openInstalledVersions lists what an installed plugin's repository offers,
+// then opens the picker.
+func (m *model) openInstalledVersions(d *detail) tea.Cmd {
+	p := *d.plugin
+	src, ok := source.FromInstalled(p)
+	if !ok {
+		m.setStatus(p.PluginID+": "+manager.ErrLocal.Error(), false)
+		return nil
+	}
+	d.loading = true
+	return m.withSpinner(func() tea.Msg {
+		v, err := m.b.Versions(m.ctx, src)
+		return versionsMsg{d: d, versions: v, err: err}
+	})
+}
+
+func (m *model) onVersions(msg versionsMsg) tea.Cmd {
+	d := msg.d
+	d.loading = false
+	if m.detail != d || d.plugin == nil {
+		return nil
+	}
+	if msg.err != nil {
+		m.setStatus("Could not list the versions: "+msg.err.Error(), true)
+		return nil
+	}
+	p := *d.plugin
+	src, _ := source.FromInstalled(p)
+	tr := manager.TrackingOf(p)
+	current := tr.Ref
+	if tr.Kind == manager.TrackDefault {
+		current = msg.versions.DefaultBranch
+	}
+	vp := &versionPicker{
+		rows: versionRows(msg.versions.Releases, msg.versions.DefaultBranch), src: src, releases: msg.versions.Releases,
+		current: current, currentMark: "installed",
+	}
+	vp.rows = append(vp.rows, pickRow{
+		kind: manager.KindReinstall, label: "Reinstall the installed version",
+		about: "Install " + manager.RevisionLabel(tr.Ref, tr.Commit) + " again, running its build commands again. It keeps following what it follows now.",
+	})
+	if tr.Kind == manager.TrackPinned {
+		vp.rows = append(vp.rows, pickRow{
+			kind: manager.KindUnpin, label: "Unpin",
+			about: "Follow what an install picks, the latest release of a plugin at the repository root or else the default branch, installing where it is now. Choose a version above to follow that one instead.",
+		})
+	} else {
+		vp.rows = append(vp.rows, pickRow{
+			kind: manager.KindPin, label: "Pin to the installed commit",
+			about: "Reinstall " + manager.RevisionLabel("", tr.Commit) + " as a commit pin, which has no updates until it is unpinned.",
+		})
+	}
+	return m.showPicker(d, vp)
+}
+
+// showPicker opens vp on its current version, and reads the repository's
+// release notes unless they were read before.
+func (m *model) showPicker(d *detail, vp *versionPicker) tea.Cmd {
+	vp.rendered = map[string][]string{}
+	for i, r := range vp.rows {
+		if r.kind == "" && r.ref == vp.current {
 			vp.cursor = i
 		}
 	}
 	d.versions = vp
 	d.view, d.offsets[viewInfo] = viewInfo, 0
 	m.showVersion(d)
-	key := d.install.src.Repository()
-	if _, ok := m.releases[key]; ok || len(p.Releases) == 0 {
+	key := vp.src.Repository()
+	if _, ok := m.releases[key]; ok || len(vp.releases) == 0 {
 		return nil
 	}
 	vp.loading = true
-	src := d.install.src
+	src := vp.src
 	return m.withSpinner(func() tea.Msg {
 		list, err := m.b.Releases(m.ctx, src)
 		return releasesMsg{d: d, key: key, list: list, err: err}
@@ -129,7 +230,7 @@ func (m *model) keyVersions(d *detail, a action) tea.Cmd {
 	case actPageDown:
 		vp.notesOffset += m.listRows()
 	case actOpen:
-		return m.chooseVersion(d, vp.refs[vp.cursor])
+		return m.chooseVersion(d, vp.rows[vp.cursor])
 	case actBack, actQuit, actVersion:
 		d.versions = nil
 	default:
@@ -139,23 +240,54 @@ func (m *model) keyVersions(d *detail, a action) tea.Cmd {
 
 func (m *model) selectVersion(d *detail, i int) {
 	vp := d.versions
-	i = min(max(i, 0), len(vp.refs)-1)
+	i = min(max(i, 0), len(vp.rows)-1)
 	if i != vp.cursor {
 		vp.cursor, vp.notesOffset = i, 0
 	}
 	m.showVersion(d)
 }
 
-// chooseVersion reloads the preview at ref. The README follows the version,
-// so it is read again when asked for.
-func (m *model) chooseVersion(d *detail, ref string) tea.Cmd {
+// chooseVersion reloads an install preview at the chosen version; the
+// README follows the version, so it is read again when asked for. For an
+// installed plugin it opens the preview of the change.
+func (m *model) chooseVersion(d *detail, r pickRow) tea.Cmd {
+	vp := d.versions
 	d.versions = nil
-	if ref == shownRef(d) {
+	if d.plugin != nil {
+		kind := r.kind
+		switch {
+		case kind != "":
+		case r.ref == vp.current:
+			kind = manager.KindReinstall
+		default:
+			kind = manager.KindSwitch
+		}
+		return m.openChange(*d.plugin, kind, r.ref)
+	}
+	if r.ref == shownRef(d) {
 		return nil
 	}
 	d.preview, d.err, d.loading = nil, nil, true
 	d.readme, d.view, d.offsets = readme{}, viewInfo, [2]int{}
-	return m.withSpinner(m.loadPreview(d, d.install.src, ref, ""))
+	return m.withSpinner(m.loadPreview(d, d.install.src, r.ref, ""))
+}
+
+// openChange opens the preview of a version change of p: the manifest at
+// the ref the change asks herdr for.
+func (m *model) openChange(p herdr.InstalledPluginInfo, kind manager.ChangeKind, ref string) tea.Cmd {
+	if kind == manager.KindUnpin {
+		ref = ""
+	}
+	ref, err := manager.VersionRef(p, kind, ref)
+	if err != nil {
+		m.setStatus(err.Error(), true)
+		return nil
+	}
+	src, _ := source.FromInstalled(p)
+	c := &pendingChange{kind: kind, plugin: p, target: manager.Target{Source: src, Ref: ref}, fromPreview: true}
+	d := &detail{crumb: tabNames[tabInstalled], title: changeVerbs[kind][2] + " " + p.Name, loading: true, change: c}
+	m.detail, m.screen = d, screenDetail
+	return m.withSpinner(m.loadPreview(d, src, ref, ""))
 }
 
 // versionLines draws the list and, when the screen is wide enough, the notes
@@ -191,52 +323,62 @@ func (m *model) versionLines(d *detail) []string {
 }
 
 // versionList is the version column: the release install picks by default
-// is marked latest, and the one the preview shows now is marked shown.
+// is marked latest, and the one shown or installed now is marked so.
 func (m *model) versionList(d *detail) []string {
 	t := m.theme
 	vp := d.versions
-	p := d.preview
-	shown := shownRef(d)
-	latest := latestRelease(p.Releases)
+	latest := latestRelease(vp.releases)
 	out := []string{m.heading("Versions", "", t.faint), ""}
-	end := min(vp.offset+m.listRows(), len(vp.refs))
+	end := min(vp.offset+m.listRows(), len(vp.rows))
 	for i := vp.offset; i < end; i++ {
-		ref := vp.refs[i]
-		label := ref
-		if ref == p.DefaultBranch && i == len(vp.refs)-1 {
-			label = "default branch (" + ref + ")"
+		r := vp.rows[i]
+		label := r.ref
+		switch {
+		case r.kind != "":
+			label = r.label
+		case r.branch:
+			label = "default branch (" + r.ref + ")"
 		}
 		style, bar := t.text, "   "
+		if r.kind != "" {
+			style = t.fg2
+		}
 		if i == vp.cursor {
 			style, bar = t.bold, " "+t.selBar.Render(glyphSelected)+" "
 		}
 		line := bar + style.Render(label)
 		switch {
-		case ref == latest:
+		case r.kind != "":
+		case r.ref == latest:
 			line += "  " + t.ok.Render("latest")
-		case updates.IsPrerelease(ref):
+		case updates.IsPrerelease(r.ref):
 			line += "  " + mark(t.faint, glyphPre, "pre-release")
 		}
-		if ref == shown {
-			line += "  " + t.faint.Render("· shown")
+		if r.kind == "" && r.ref == vp.current {
+			line += "  " + t.faint.Render("· "+vp.currentMark)
 		}
 		out = append(out, line)
 	}
 	return out
 }
 
-// notesColumn is the heading and release notes of the selected version.
+// notesColumn is the heading and release notes of the selected version, or
+// what the selected change does.
 func (m *model) notesColumn(d *detail, width int) []string {
 	t := m.theme
 	vp := d.versions
-	ref := vp.refs[vp.cursor]
+	r := vp.rows[vp.cursor]
+	if r.kind != "" {
+		return append([]string{t.bold.Render(r.label), ""}, strings.Split(ansi.Wrap(t.fg2.Render(r.about), width, ""), "\n")...)
+	}
+	ref := r.ref
 	say := func(style lipgloss.Style, text string) []string {
 		return []string{t.bold.Render(ref), "", style.Render(text)}
 	}
-	if ref == d.preview.DefaultBranch && vp.cursor == len(vp.refs)-1 {
+	if r.branch {
 		return say(t.faint, "The default branch as it is now. It has no release notes.")
 	}
-	cached, ok := m.releases[d.install.src.Repository()]
+	cached, ok := m.releases[vp.src.Repository()]
 	switch {
 	case vp.loading || !ok:
 		return say(t.faint, "Reading the release notes…")

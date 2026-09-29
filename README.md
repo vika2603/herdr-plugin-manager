@@ -50,6 +50,8 @@ For the command line alone, download the archive for your platform from the
 Open the popup, or run `hpm` with no arguments for the same interface in the
 terminal. Press `?` for every key; the mouse scrolls, and a click selects,
 then opens. `i` installs from the preview, which shows what the plugin runs.
+On an installed plugin, `v` lists its versions to switch to, and reinstalls,
+pins or unpins it; `z` rolls back the last change.
 An install takes the latest release of a plugin at the root of its
 repository, else the default branch; `v` in the preview chooses another
 version and shows its release notes.
@@ -79,6 +81,9 @@ components.
 | `hpm outdated` / `hpm update [id...]` | check for and apply updates; exit with an error if any check fails |
 | `hpm rollback <id>` | undo the last change this manager made to a plugin |
 | `hpm history [id]` | changes made to plugins, with herdr's output |
+| `hpm switch <id> <ref>` | install another version: a release, branch or commit |
+| `hpm pin <id>` / `hpm unpin <id> [ref]` | hold a plugin at its commit, or follow a ref again |
+| `hpm reinstall <id>` | reinstall the installed version |
 | `hpm logs <id>` | recent commands herdr ran for a plugin |
 
 The marketplace is not reviewed: read the preview before installing.
@@ -87,7 +92,8 @@ herdr registers every plugin it installs as enabled, so an update, rollback
 or other reinstall of a disabled plugin disables it again afterwards; that
 needs a running herdr server, and without one the change is refused before
 anything runs. A failed install leaves the installed plugin as it was, and
-each change reports the plugin's state after it. Changes are recorded in
+each change reports the plugin's state after it; when that cannot be read,
+the change counts as unconfirmed, not done. Changes are recorded in
 `$XDG_STATE_HOME/herdr-plugin-manager` (`~/.local/state/herdr-plugin-manager`
 by default), which `hpm rollback` and `hpm history` read.
 

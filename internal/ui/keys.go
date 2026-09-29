@@ -113,9 +113,9 @@ func (m *model) keyMap() keyMap {
 		switch {
 		case d.plugin != nil:
 			if ch, ok := m.checks[d.plugin.PluginID]; ok && ch.Err == nil && ch.Result.Kind == updates.Available {
-				return keyMap{short: []key.Binding{h.update, other, h.toggle, h.remove, h.rollback, h.home, h.scroll, h.back}}
+				return keyMap{short: []key.Binding{h.update, other, h.toggle, h.version, h.remove, h.rollback, h.home, h.scroll, h.back}}
 			}
-			return keyMap{short: []key.Binding{other, h.toggle, h.update, h.remove, h.rollback, h.home, h.logs, h.scroll, h.back}}
+			return keyMap{short: []key.Binding{other, h.toggle, h.update, h.version, h.remove, h.rollback, h.home, h.logs, h.scroll, h.back}}
 		case d.change != nil:
 			return keyMap{short: []key.Binding{m.applyKey(d), other, h.home, h.scroll, h.back}}
 		default:

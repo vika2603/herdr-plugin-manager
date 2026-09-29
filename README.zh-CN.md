@@ -47,7 +47,7 @@ description = "Manage plugins"
 
 打开弹窗，或不带参数运行 `hpm`，在终端里打开同样的界面。按 `?` 查看所有按键；鼠标可以滚动，单击选中，再次单击打开。
 在预览里按 `i` 安装，预览会列出插件将运行的命令。安装位于仓库根目录的插件时默认装最新的 release，其他情况装默认分支；
-在预览里按 `v` 可以选择其他版本，并查看它的 release notes。
+在预览里按 `v` 可以选择其他版本，并查看它的 release notes。对已安装的插件，`v` 列出可切换的版本，也可以重装、固定或解除固定；`z` 回退最近一次变更。
 
 `hpm keys` 列出所有按键，以及用来修改按键和颜色的配置文件：
 
@@ -72,11 +72,14 @@ accent = "teal"    # indigo、teal、magenta 或 "#RRGGBB"
 | `hpm outdated` / `hpm update [id...]` | 检查并应用更新；任一检查失败时以错误退出 |
 | `hpm rollback <id>` | 撤销本管理器对插件做的最近一次变更 |
 | `hpm history [id]` | 对插件做过的变更，以及 herdr 的输出 |
+| `hpm switch <id> <ref>` | 安装另一个版本：release、分支或 commit |
+| `hpm pin <id>` / `hpm unpin <id> [ref]` | 固定在当前 commit，或重新跟踪某个 ref |
+| `hpm reinstall <id>` | 重装当前版本 |
 | `hpm logs <id>` | herdr 最近为插件运行的命令 |
 
 插件市场未经审核，安装前请先看预览。
 
-herdr 安装的插件总是注册为启用，所以对已禁用插件的更新、回退或其他重装会在之后重新禁用它；这需要正在运行的 herdr server，没有 server 时变更会在执行任何操作前被拒绝。安装失败时已安装的插件保持原样，每次变更都会报告插件之后的状态。变更记录在 `$XDG_STATE_HOME/herdr-plugin-manager`（默认 `~/.local/state/herdr-plugin-manager`），供 `hpm rollback` 和 `hpm history` 读取。
+herdr 安装的插件总是注册为启用，所以对已禁用插件的更新、回退或其他重装会在之后重新禁用它；这需要正在运行的 herdr server，没有 server 时变更会在执行任何操作前被拒绝。安装失败时已安装的插件保持原样，每次变更都会报告插件之后的状态；无法读取该状态时，变更记为未确认，而不是完成。变更记录在 `$XDG_STATE_HOME/herdr-plugin-manager`（默认 `~/.local/state/herdr-plugin-manager`），供 `hpm rollback` 和 `hpm history` 读取。
 
 ## 开发
 

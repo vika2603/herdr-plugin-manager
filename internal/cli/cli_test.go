@@ -456,3 +456,80 @@ func TestUpdateKeepsADisabledPluginAsItWas(t *testing.T) {
 		t.Errorf("installed a disabled plugin with no server to disable it again: %q", h.calls())
 	}
 }
+
+// pluginAt is the plugin list with o.a installed from ref at commit.
+func pluginAt(ref, commit string) string {
+	return `{"result":{"type":"plugin_list","plugins":[{"plugin_id":"o.a","name":"a","version":"1","enabled":true,"manifest_path":"/x","plugin_root":"/x",` +
+		`"source":{"kind":"github","owner":"o","repo":"a","requested_ref":"` + ref + `","resolved_commit":"` + commit + `"}}]}}`
+}
+
+func TestVersionChanges(t *testing.T) {
+	t.Run("switch installs the ref and says what it follows", func(t *testing.T) {
+		h := newCheckHarness(t)
+		h.m.Git = lister{tags: []string{"v0.2.0"}}
+		h.installs(pluginAt("v0.2.0", head))
+		out, _, err := h.run("", false, "switch", "o.a", "v0.2.0", "--yes")
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		if !strings.Contains(out, "updates: follows new releases, installed at v0.2.0") {
+			t.Errorf("the preview does not say how the plugin will be updated:\n%s", out)
+		}
+		if !h.ran("plugin install o/a --ref v0.2.0 --yes") {
+			t.Errorf("calls = %q", h.calls())
+		}
+	})
+	t.Run("pin holds the installed commit", func(t *testing.T) {
+		h := newCheckHarness(t)
+		h.setInstalled(pluginAt("", older))
+		h.installs(pluginAt(older, older))
+		out, _, err := h.run("", false, "pin", "o.a", "--yes")
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		if !h.ran("plugin install o/a --ref " + older + " --yes") {
+			t.Errorf("calls = %q", h.calls())
+		}
+		if _, _, err := h.run("", false, "pin", "o.a"); err == nil || !strings.Contains(err.Error(), "already pinned") {
+			t.Errorf("pinning twice: %v", err)
+		}
+	})
+	t.Run("unpin follows what an install picks", func(t *testing.T) {
+		h := newCheckHarness(t)
+		h.setInstalled(pluginAt(older, older))
+		h.installs(pluginAt("", head))
+		if _, _, err := h.run("", false, "unpin", "o.a", "--yes"); err != nil {
+			t.Fatal(err)
+		}
+		if !h.ran("plugin install o/a --yes") {
+			t.Errorf("calls = %q", h.calls())
+		}
+	})
+	t.Run("unpin of a plugin that is not pinned", func(t *testing.T) {
+		h := newCheckHarness(t)
+		if _, _, err := h.run("", false, "unpin", "o.a", "--yes"); err == nil || !strings.Contains(err.Error(), "is not pinned: it follows the default branch") {
+			t.Errorf("err = %v", err)
+		}
+	})
+	t.Run("reinstall is refused when the ref moved on", func(t *testing.T) {
+		h := newCheckHarness(t)
+		out, _, err := h.run("", false, "reinstall", "o.a", "--yes")
+		if err == nil || !strings.Contains(out, "reinstalling it would update the plugin") {
+			t.Errorf("err = %v\n%s", err, out)
+		}
+		if h.ran("plugin install") {
+			t.Errorf("reinstalled at another commit: %q", h.calls())
+		}
+	})
+	t.Run("reinstall at the installed commit", func(t *testing.T) {
+		h := newCheckHarness(t)
+		h.setInstalled(pluginAt("", head))
+		h.installs(pluginAt("", head))
+		if _, _, err := h.run("", false, "reinstall", "o.a", "--yes"); err != nil {
+			t.Fatal(err)
+		}
+		if !h.ran("plugin install o/a --yes") {
+			t.Errorf("calls = %q", h.calls())
+		}
+	})
+}

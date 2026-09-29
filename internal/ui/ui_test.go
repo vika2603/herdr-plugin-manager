@@ -41,6 +41,8 @@ type fakeBackend struct {
 	// undo is what PlanRollback returns, with undoErr.
 	undo    manager.Undo
 	undoErr error
+	// versions is what Versions returns.
+	versions manager.Versions
 	// previewGate, when set, keeps Preview reading its plugin list until it
 	// is closed.
 	previewGate chan struct{}
@@ -105,6 +107,19 @@ func (f *fakeBackend) Apply(ctx context.Context, c manager.Change, out io.Writer
 		o.After = &after
 	}
 	return o
+}
+
+func (f *fakeBackend) Versions(_ context.Context, src source.GitHub) (manager.Versions, error) {
+	f.record("versions %s", src)
+	return f.versions, nil
+}
+
+func (f *fakeBackend) PreviewAt(ctx context.Context, src source.GitHub, ref, commit, herdrVersion string, installed []herdr.InstalledPluginInfo) (*manager.Preview, error) {
+	p, err := f.Preview(ctx, src, commit, "", herdrVersion, installed)
+	if err == nil {
+		p.Ref, p.Commit = ref, commit
+	}
+	return p, err
 }
 
 func (f *fakeBackend) PlanRollback(_ context.Context, id string) (manager.Undo, error) {
@@ -641,6 +656,67 @@ func TestFailedUpdateSaysWhereThePluginStands(t *testing.T) {
 	if h.m.screen != screenOutput || !strings.Contains(out, "build failed") || !strings.Contains(out, "alpha is unchanged: 1.0.0 at the default branch, enabled") {
 		t.Errorf("the output screen does not say alpha is unchanged:\n%s", out)
 	}
+}
+
+// withCommit is newFake with alpha installed from the default branch at a
+// commit, and releases to choose from.
+func withCommit() *fakeBackend {
+	b := newFake()
+	src := b.plugins[0].Source.ValueOrZero()
+	src.ResolvedCommit = herdr.Some(strings.Repeat("a", 40))
+	b.plugins[0].Source = herdr.Some(src)
+	b.versions = manager.Versions{Releases: []string{"v1.1.0", "v1.0.0"}, DefaultBranch: "main"}
+	return b
+}
+
+func TestInstalledVersions(t *testing.T) {
+	t.Run("the detail says how the plugin is updated", func(t *testing.T) {
+		h := start(t, withCommit())
+		h.press("enter")
+		if out := h.words(); !strings.Contains(out, "UPDATES follows the default branch · v for versions") {
+			t.Errorf("detail:\n%s", out)
+		}
+	})
+	t.Run("switch to an older release", func(t *testing.T) {
+		b := withCommit()
+		h := start(t, b)
+		h.press("enter", "v")
+		out := h.words()
+		for _, want := range []string{"v1.1.0 latest", "default branch (main) · installed", "Reinstall the installed version", "Pin to the installed commit"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("picker lacks %q:\n%s", want, out)
+			}
+		}
+		h.press("up", "enter")
+		out = h.words()
+		if !strings.Contains(out, "Switch alpha") || !strings.Contains(out, "UPDATES follows new releases, installed at v1.0.0") || !strings.Contains(out, "i switch") {
+			t.Fatalf("no switch preview:\n%s", out)
+		}
+		h.press("i")
+		if got := b.Calls(); got[len(got)-1] != "switch alpha v1.0.0" {
+			t.Errorf("calls = %q", got)
+		}
+	})
+	t.Run("pin", func(t *testing.T) {
+		b := withCommit()
+		h := start(t, b)
+		h.press("enter", "v", "down", "down", "enter")
+		if out := h.words(); !strings.Contains(out, "Pin alpha") || !strings.Contains(out, "UPDATES pinned to commit aaaaaaaaaaaa") {
+			t.Fatalf("no pin preview:\n%s", out)
+		}
+		h.press("i")
+		if got := b.Calls(); got[len(got)-1] != "pin alpha "+strings.Repeat("a", 40) {
+			t.Errorf("calls = %q", got)
+		}
+	})
+	t.Run("reinstall at the installed version", func(t *testing.T) {
+		b := withCommit()
+		h := start(t, b)
+		h.press("enter", "v", "enter")
+		if out := h.words(); !strings.Contains(out, "Reinstall alpha") {
+			t.Fatalf("choosing the installed version should preview a reinstall:\n%s", out)
+		}
+	})
 }
 
 func TestRollback(t *testing.T) {

@@ -94,9 +94,9 @@ func (m *model) clickDetail(ms tea.Mouse) tea.Cmd {
 		row := ms.Y - detailBodyTop - versionsTop
 		i := vp.offset + row
 		switch {
-		case ms.X >= vp.listWidth || row < 0 || i >= len(vp.refs):
+		case ms.X >= vp.listWidth || row < 0 || i >= len(vp.rows):
 		case i == vp.cursor:
-			return m.chooseVersion(d, vp.refs[i])
+			return m.chooseVersion(d, vp.rows[i])
 		default:
 			m.selectVersion(d, i)
 		}

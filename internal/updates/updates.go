@@ -127,6 +127,13 @@ func (r Refs) Releases() []string {
 	return tags
 }
 
+// IsRelease reports whether tag is a release tag, such as v1.2.3, which a
+// plugin installed from it follows to newer releases.
+func IsRelease(tag string) bool {
+	_, ok := releaseVersion(tag)
+	return ok
+}
+
 // IsPrerelease reports whether tag is a release tag for a pre-release, such
 // as v1.0.0-rc.1.
 func IsPrerelease(tag string) bool {
