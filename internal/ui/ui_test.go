@@ -49,6 +49,10 @@ type fakeBackend struct {
 	previewGate chan struct{}
 	// releases are what Releases returns.
 	releases []market.Release
+	// history is what HistoryEntries returns, the oldest first, and logs
+	// what Logs does.
+	history []manager.Entry
+	logs    []herdr.PluginCommandLogInfo
 }
 
 func (f *fakeBackend) record(format string, args ...any) {
@@ -74,8 +78,8 @@ func (f *fakeBackend) SetEnabled(_ context.Context, id string, enabled bool) err
 	return nil
 }
 
-func (*fakeBackend) Logs(context.Context, string, int) ([]herdr.PluginCommandLogInfo, error) {
-	return []herdr.PluginCommandLogInfo{}, nil
+func (f *fakeBackend) Logs(context.Context, string, int) ([]herdr.PluginCommandLogInfo, error) {
+	return append([]herdr.PluginCommandLogInfo{}, f.logs...), nil
 }
 
 // Apply records an install as "install <source> <ref>", and any other
@@ -92,17 +96,20 @@ func (f *fakeBackend) Apply(ctx context.Context, c manager.Change, out io.Writer
 		f.lastUpdated = *c.Current
 		f.mu.Unlock()
 	}
+	fmt.Fprintln(out, "cloning", t.Source)
 	if f.installHook != nil {
 		f.installHook(ctx)
 	}
-	fmt.Fprintln(out, "cloning", t.Source)
 	o := manager.Outcome{Kind: c.Kind, ID: c.ID, Err: f.installErr}
+	if ctx.Err() != nil {
+		o.Err = fmt.Errorf("%w: herdr was interrupted", manager.ErrCancelled)
+	}
 	if c.Current != nil {
 		before := manager.StateOf(*c.Current)
 		o.Before = &before
 	}
 	after := manager.State{Version: "new", Source: t.Source.String(), Ref: t.Ref, Commit: t.Commit, Enabled: true}
-	if f.installErr != nil {
+	if o.Err != nil {
 		o.After = o.Before
 	} else {
 		o.After = &after
@@ -171,6 +178,12 @@ func (*fakeBackend) InstalledReadme(p herdr.InstalledPluginInfo) (*manager.Readm
 func (f *fakeBackend) OpenURL(_ context.Context, url string) error {
 	f.record("open %s", url)
 	return nil
+}
+
+func (f *fakeBackend) HistoryEntries() ([]manager.Entry, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.history), nil
 }
 
 func (f *fakeBackend) Uninstall(_ context.Context, id string, _ io.Writer) error {

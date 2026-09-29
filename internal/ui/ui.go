@@ -3,7 +3,6 @@
 package ui
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"fmt"
@@ -49,6 +48,7 @@ type Backend interface {
 	Releases(ctx context.Context, src source.GitHub) ([]market.Release, error)
 	InstalledReadme(p herdr.InstalledPluginInfo) (*manager.Readme, error)
 	OpenURL(ctx context.Context, url string) error
+	HistoryEntries() ([]manager.Entry, error)
 }
 
 // Options adjust the program to where it runs.
@@ -99,6 +99,8 @@ const (
 	screenOutput
 	// screenReview is the review of several updates before they run.
 	screenReview
+	// screenHistory lists the changes recorded in the history.
+	screenHistory
 )
 
 // logLimit is how many command logs the detail view asks for.
@@ -163,11 +165,25 @@ type model struct {
 
 	spinner spinner.Model
 	ticking bool
-	// busy describes the running install, update or uninstall; only one
-	// runs at a time.
-	busy         string
-	output       output
+	// busy describes the running install, update or uninstall, and live
+	// is its output so far; only one runs at a time.
+	busy string
+	live *liveOp
+	// toggling counts the enable and disable requests not yet answered;
+	// no operation starts while one is.
+	toggling int
+	// output is the last operation's; page is what the output screen shows
+	// when no operation runs: output, or a change from the history.
+	output output
+	page   *output
+	// outputFollow keeps the output screen at its end as lines arrive;
+	// outputMax is the last offset it drew.
 	outputOffset int
+	outputFollow bool
+	outputMax    int
+	outputLines  outputCache
+	// history is open while the recorded changes are listed.
+	history *historyView
 
 	status    string
 	statusErr bool
@@ -257,9 +273,14 @@ type confirm struct {
 }
 
 type output struct {
-	title string
-	text  string
-	err   error
+	title     string
+	text      string
+	err       error
+	cancelled bool
+	// retry starts the part that did not succeed again, nil when there is
+	// none; back is the screen the output returns to.
+	retry func() tea.Cmd
+	back  screen
 }
 
 func newModel(ctx context.Context, b Backend, opts Options) *model {
@@ -378,12 +399,6 @@ type (
 		undo   manager.Undo
 		err    error
 	}
-	opDoneMsg struct {
-		title  string
-		done   string
-		output string
-		err    error
-	}
 )
 
 func (m *model) Init() tea.Cmd {
@@ -468,31 +483,6 @@ func (m *model) setEnabled(id string, enabled bool) tea.Cmd {
 	}
 }
 
-// operation runs a long backend call, collecting what herdr prints for the
-// output screen. run returns what the status line says when it succeeds.
-func (m *model) operation(title string, run func(out io.Writer) (string, error)) tea.Cmd {
-	m.busy = title
-	m.status, m.statusErr = "", false
-	m.ops.Add(1)
-	return func() tea.Msg {
-		defer m.ops.Done()
-		var buf bytes.Buffer
-		done, err := run(&buf)
-		return opDoneMsg{title: title, done: done, output: buf.String(), err: err}
-	}
-}
-
-// install installs t as plugin id, over existing when that is installed.
-func (m *model) install(t installTarget, id string, existing *herdr.InstalledPluginInfo) tea.Cmd {
-	return m.operation("Installing "+t.src.String(), func(out io.Writer) (string, error) {
-		o := m.b.Apply(m.ctx, manager.Change{
-			Kind: manager.KindInstall, ID: id, Current: existing,
-			Target: manager.Target{Source: t.src, Ref: t.ref, Commit: t.commit},
-		}, out)
-		return o.Summary(), o.Error()
-	})
-}
-
 // current is the latest record of p: whether a plugin is enabled may have
 // changed since its update was checked, and Update keeps that state.
 func (m *model) current(p herdr.InstalledPluginInfo) herdr.InstalledPluginInfo {
@@ -511,27 +501,6 @@ func updateChange(ch manager.Checked) pendingChange {
 		kind: manager.KindUpdate, plugin: ch.Plugin,
 		target: manager.Target{Source: r.Source, Ref: r.TargetRef, Commit: r.TargetCommit},
 	}
-}
-
-// applyChange applies a previewed change.
-func (m *model) applyChange(c pendingChange) tea.Cmd {
-	c.plugin = m.current(c.plugin)
-	id := c.plugin.PluginID
-	return m.operation(changeVerbs[c.kind][1]+" "+id, func(out io.Writer) (string, error) {
-		var o manager.Outcome
-		if c.undo != nil {
-			o = m.b.Rollback(m.ctx, *c.undo, out)
-		} else {
-			o = m.b.Apply(m.ctx, manager.Change{Kind: c.kind, ID: id, Current: &c.plugin, Target: c.target}, out)
-		}
-		return o.Summary(), o.Error()
-	})
-}
-
-func (m *model) uninstall(id string) tea.Cmd {
-	return m.operation("Uninstalling "+id, func(out io.Writer) (string, error) {
-		return "Uninstalled " + id, m.b.Uninstall(m.ctx, id, out)
-	})
 }
 
 // planRollback finds what undoing the last change to p would do.

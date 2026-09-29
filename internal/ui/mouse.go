@@ -45,8 +45,11 @@ func (m *model) wheel(ms tea.Mouse) {
 		}
 	case screenOutput:
 		m.outputOffset = max(m.outputOffset+lines, 0)
+		m.outputFollow = m.outputOffset >= m.outputMax
 	case screenReview:
 		m.moveReview(a)
+	case screenHistory:
+		m.moveHistory(a)
 	}
 }
 
@@ -61,7 +64,7 @@ func (m *model) click(ms tea.Mouse) tea.Cmd {
 		return m.clickList(ms)
 	case screenDetail:
 		return m.clickDetail(ms)
-	case screenOutput, screenReview:
+	case screenOutput, screenReview, screenHistory:
 	}
 	return nil
 }

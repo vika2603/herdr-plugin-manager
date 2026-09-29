@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,7 +9,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/vika2603/herdr-client/herdr"
 	"github.com/vika2603/herdr-client/herdrtest"
@@ -520,4 +523,52 @@ esac`)
 			t.Errorf("last entry = %+v", last)
 		}
 	})
+}
+
+func TestCancelledInstallIsRecordedAsCancelled(t *testing.T) {
+	r := newRegistry(t, true, "echo building; exec sleep 30", at("v1.0.0", commitV1, true))
+	r.m.Git = releases
+	ctx, cancel := context.WithCancel(context.Background())
+	out := &syncBuffer{}
+	go func() {
+		for !strings.Contains(out.String(), "building") {
+			time.Sleep(10 * time.Millisecond)
+		}
+		cancel()
+	}()
+	current := at("v1.0.0", commitV1, true)
+	began := time.Now()
+	o := r.m.Apply(ctx, Change{Kind: KindUpdate, ID: "o.r", Current: &current,
+		Target: Target{Source: src, Ref: "v2.0.0", Commit: commitV2}}, out)
+	if waited := time.Since(began); waited > 5*time.Second {
+		t.Errorf("the interrupted build ran on for %v", waited)
+	}
+	if !errors.Is(o.Err, ErrCancelled) {
+		t.Fatalf("err = %v, want it cancelled", o.Err)
+	}
+	if o.After == nil || o.After.Commit != commitV1 {
+		t.Errorf("after = %+v, want the plugin left at %s", o.After, commitV1)
+	}
+	entries, err := r.m.HistoryEntries()
+	if err != nil || len(entries) != 1 || entries[0].Result() != "cancelled" {
+		t.Fatalf("history = %+v, %v; want one cancelled change", entries, err)
+	}
+}
+
+// syncBuffer is a buffer written by one goroutine while another reads it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }

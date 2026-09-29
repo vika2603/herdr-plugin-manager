@@ -44,6 +44,8 @@ func (m *model) View() tea.View {
 		content = m.viewOutput()
 	case screenReview:
 		content = m.viewReview()
+	case screenHistory:
+		content = m.viewHistory()
 	default:
 		content = m.viewList()
 	}
@@ -77,7 +79,7 @@ func (m *model) bodyHeight() int {
 		chrome = listChrome
 	case screenDetail:
 		chrome = detailChrome
-	case screenOutput, screenReview:
+	case screenOutput, screenReview, screenHistory:
 	}
 	return max(m.h()-chrome-len(m.helpLines()), 1)
 }
@@ -272,16 +274,20 @@ func spread(left, right string, width int) string {
 func (m *model) statusLine() string {
 	t := m.theme
 	switch {
-	case m.busy != "":
-		return " " + m.spinner.View() + " " + t.text.Render(m.busy+"…")
+	case m.busy != "" && (m.status == "" || !m.statusErr):
+		return " " + m.spinner.View() + " " + m.busyLine()
 	case m.status != "" && m.statusErr:
 		return " " + t.err.Render(glyphFailed+" "+m.status)
 	case m.status != "":
 		return " " + t.ok.Render(glyphDone) + " " + t.text.Render(m.status)
 	}
 	progress := func(text string) string { return " " + m.spinner.View() + " " + t.fg2.Render(text) }
-	if m.screen == screenReview {
+	switch m.screen {
+	case screenReview:
 		return m.reviewStatus()
+	case screenHistory:
+		return m.historyStatus()
+	case screenList, screenDetail, screenOutput:
 	}
 	if m.screen != screenList {
 		if m.spinning() {
@@ -880,36 +886,146 @@ func (m *model) logLines(d *detail) []string {
 		if l.Status == herdr.PluginCommandStatusFailed {
 			glyph, style = t.err.Render(glyphFailed), t.err
 		}
-		out = append(out, subIndent+glyph+" "+style.Render(manager.LogHeader(l)))
-		if text := strings.TrimSpace(l.Stderr.ValueOrZero()); text != "" {
+		out = append(out, subIndent+glyph+" "+style.Render(safe.Line(manager.LogHeader(l))))
+		for _, stream := range []struct{ name, text string }{{"stdout", l.Stdout.ValueOrZero()}, {"stderr", l.Stderr.ValueOrZero()}} {
+			text := strings.TrimRight(safe.Text(stream.text), "\n")
+			if strings.TrimSpace(text) == "" {
+				continue
+			}
+			out = append(out, subIndent+"  "+t.fg2.Render(stream.name+":"))
 			for line := range strings.SplitSeq(text, "\n") {
-				out = append(out, subIndent+"  "+t.faint.Render(line))
+				out = append(out, wrapIndented(subIndent+"    "+t.faint.Render(line), m.w()-1)...)
 			}
 		}
 	}
 	return out
 }
 
+// outputCache is the output screen's lines, wrapped to the width they are
+// drawn at but not styled, so a long output is not wrapped again on every
+// frame and a running operation only has its new lines wrapped.
+type outputCache struct {
+	// src is the output the lines are of: a running operation or a page.
+	src   any
+	width int
+	// done counts the bytes of the output in lines; a running operation's
+	// line not yet ended is left out.
+	done  int
+	lines []string
+}
+
+func (c *outputCache) add(text string) {
+	c.lines = appendWrapped(c.lines, text, c.width)
+}
+
+// appendWrapped adds the lines of text to out, wrapping those wider than
+// width.
+func appendWrapped(out []string, text string, width int) []string {
+	for line := range strings.SplitSeq(safe.Text(text), "\n") {
+		// A line has no more columns than bytes.
+		if len(line) <= width || ansi.StringWidth(line) <= width {
+			out = append(out, line)
+			continue
+		}
+		out = append(out, strings.Split(ansi.Wrap(line, width, ""), "\n")...)
+	}
+	return out
+}
+
+// outputPad indents the output screen's lines.
+const outputPad = indent + " "
+
+// viewOutput shows what herdr printed: as it prints it while an operation
+// runs, else the page chosen, the last operation's or a recorded change's.
+// Only the lines on screen are styled.
 func (m *model) viewOutput() string {
 	t := m.theme
-	title := m.output.title
-	if m.output.err != nil {
+	var (
+		page output
+		src  any
+		more func(from int) string
+	)
+	switch {
+	case m.live != nil:
+		page, src, more = output{title: m.busy + " (running)"}, m.live, m.live.from
+		if m.live.stopping {
+			page.title = m.busy + " (cancelling)"
+		}
+	case m.page != nil:
+		page, src = *m.page, m.page
+	default:
+		page, src = m.output, &m.output
+	}
+	if more == nil {
+		// herdr's output includes what the plugin's build commands printed.
+		text := strings.TrimRight(page.text, "\n")
+		more = func(from int) string { return text[min(from, len(text)):] }
+	}
+	title := page.title
+	switch {
+	case page.cancelled:
+		title += " cancelled"
+	case page.err != nil:
 		title += " failed"
 	}
-	// herdr's output includes what the plugin's build commands printed.
-	text := safe.Text(strings.TrimRight(m.output.text, "\n"))
-	if text == "" {
-		text = "(herdr printed nothing)"
+
+	c := &m.outputLines
+	width := max(m.w()-1-len(outputPad), 10)
+	if c.src != src || c.width != width {
+		*c = outputCache{src: src, width: width}
 	}
-	var lines []string
-	for line := range strings.SplitSeq(text, "\n") {
-		lines = append(lines, wrapIndented(indent+" "+t.text.Render(line), m.w()-1)...)
+	chunk := more(c.done)
+	if m.live != nil {
+		// The last line may still be printed to; it is wrapped anew until it
+		// ends.
+		if i := strings.LastIndexByte(chunk, '\n'); i >= 0 {
+			c.add(chunk[:i])
+			c.done += i + 1
+			chunk = chunk[i+1:]
+		}
+	} else if chunk != "" {
+		c.add(chunk)
+		c.done += len(chunk)
+		chunk = ""
 	}
-	if m.output.err != nil {
-		for line := range strings.SplitSeq(safe.Text(m.output.err.Error()), "\n") {
-			lines = append(lines, wrapIndented(indent+" "+t.err.Render(line), m.w()-1)...)
+	var rest []string
+	if chunk != "" {
+		rest = appendWrapped(nil, chunk, width)
+	}
+	if len(c.lines)+len(rest) == 0 {
+		rest = []string{"(herdr printed nothing)"}
+		if m.live != nil {
+			rest = []string{"(herdr has printed nothing yet)"}
 		}
 	}
-	m.outputOffset = min(m.outputOffset, max(len(lines)-m.bodyHeight(), 0))
-	return m.frame(m.crumbs(tabNames[m.tab], title), nil, lines[m.outputOffset:])
+	var errLines []string
+	if page.err != nil {
+		for line := range strings.SplitSeq(safe.Text(page.err.Error()), "\n") {
+			errLines = append(errLines, wrapIndented(outputPad+t.err.Render(line), m.w()-1)...)
+		}
+	}
+
+	total := len(c.lines) + len(rest) + len(errLines)
+	height := m.bodyHeight()
+	m.outputMax = max(total-height, 0)
+	if m.outputFollow {
+		m.outputOffset = m.outputMax
+	}
+	m.outputOffset = min(m.outputOffset, m.outputMax)
+	body := make([]string, 0, height)
+	for i := m.outputOffset; i < total && len(body) < height; i++ {
+		switch j := i - len(c.lines); {
+		case j < 0:
+			body = append(body, outputPad+t.text.Render(c.lines[i]))
+		case j < len(rest):
+			body = append(body, outputPad+t.text.Render(rest[j]))
+		default:
+			body = append(body, errLines[j-len(rest)])
+		}
+	}
+	from := tabNames[m.tab]
+	if page.back == screenHistory {
+		from = "History"
+	}
+	return m.frame(m.crumbs(from, title), nil, body)
 }

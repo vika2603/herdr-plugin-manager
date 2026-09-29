@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"io"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -166,43 +165,6 @@ func (m *model) askApplyReview() {
 		prompt: fmt.Sprintf("Update %s? Their build commands run again", plural(len(list), "plugin")),
 		run:    func() tea.Cmd { return m.applyReview(b) },
 	}
-}
-
-// applyReview updates the included plugins at the commits their reviews
-// showed, one after another, and reports the rest as skipped.
-func (m *model) applyReview(b *batchReview) tea.Cmd {
-	items := append([]reviewItem(nil), b.items...)
-	included := b.includedItems()
-	return m.operation("Updating "+plural(len(included), "plugin"), func(out io.Writer) (string, error) {
-		var failed []string
-		done := 0
-		for _, it := range items {
-			id := it.checked.Plugin.PluginID
-			switch {
-			case it.review == nil:
-				continue
-			case !it.review.Ready():
-				fmt.Fprintf(out, "== %s: skipped, it cannot be updated: %s\n", id, it.review.Blocker())
-				continue
-			case it.leftOut:
-				fmt.Fprintf(out, "== %s: left out\n", id)
-				continue
-			}
-			done++
-			fmt.Fprintf(out, "== %s (%d of %d): %s\n", id, done, len(included), it.review.Explain.Headline)
-			o := m.b.Apply(m.ctx, it.review.Change(), out)
-			if err := o.Error(); err != nil {
-				fmt.Fprintf(out, "%v\n", err)
-				failed = append(failed, id)
-				continue
-			}
-			fmt.Fprintln(out, o.Summary())
-		}
-		if len(failed) > 0 {
-			return "", fmt.Errorf("not updated: %s", strings.Join(failed, ", "))
-		}
-		return "Updated " + plural(len(included), "plugin"), nil
-	})
 }
 
 func (m *model) viewReview() string {

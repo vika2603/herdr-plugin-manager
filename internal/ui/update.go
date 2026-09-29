@@ -122,6 +122,8 @@ func (m *model) result(msg tea.Msg) (tea.Cmd, bool) {
 		m.onEnabled(msg)
 	case opDoneMsg:
 		return m.onOpDone(msg), true
+	case historyMsg:
+		onHistory(msg)
 	default:
 		return nil, false
 	}
@@ -154,6 +156,7 @@ func (m *model) onIndex(msg indexMsg) {
 }
 
 func (m *model) onEnabled(msg enabledMsg) {
+	m.toggling--
 	if msg.err != nil {
 		m.setStatus(msg.err.Error(), true)
 		return
@@ -170,23 +173,6 @@ func (m *model) onEnabled(msg enabledMsg) {
 		d.plugin.Enabled = msg.enabled
 	}
 	m.setStatus(enabledWord(msg.enabled)+" "+msg.id, false)
-}
-
-// onOpDone ends an install, update or uninstall: a failure opens herdr's
-// output, a success returns to the list. Either way the list is reloaded.
-func (m *model) onOpDone(msg opDoneMsg) tea.Cmd {
-	m.busy, m.review = "", nil
-	m.output = output{title: msg.title, text: msg.output, err: msg.err}
-	if msg.err != nil {
-		m.setStatus(msg.err.Error(), true)
-		m.screen, m.detail, m.outputOffset = screenOutput, nil, 0
-	} else {
-		m.setStatus(msg.done+" · o shows herdr's output", false)
-		if m.screen == screenDetail || m.screen == screenReview {
-			m.screen, m.detail = screenList, nil
-		}
-	}
-	return m.loadInstalled()
 }
 
 // spinning reports whether anything the status line shows is in progress.
@@ -208,6 +194,10 @@ func (m *model) withSpinner(cmd tea.Cmd) tea.Cmd {
 func (m *model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
 	if k == "ctrl+c" {
+		// The first ctrl+c cancels a running operation, and a second quits.
+		if m.cancelOperation() {
+			return m, nil
+		}
 		return m, tea.Quit
 	}
 	if c := m.confirm; c != nil {
@@ -225,6 +215,8 @@ func (m *model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.keyDetail(k)
 	case screenReview:
 		return m.keyReview(m.keys.action(k, onList))
+	case screenHistory:
+		return m.keyHistory(m.keys.action(k, onList))
 	case screenList:
 	}
 
@@ -293,10 +285,15 @@ func (m *model) listAction(a action) (tea.Model, tea.Cmd) {
 	case actHomepage:
 		return m, m.openHomepage()
 	case actOutput:
-		if m.output.title != "" {
-			m.screen, m.outputOffset = screenOutput, 0
+		switch {
+		case m.live != nil:
+			m.screen, m.page, m.outputFollow = screenOutput, nil, true
+		case m.output.title != "":
+			m.screen, m.page, m.outputOffset, m.outputFollow = screenOutput, &m.output, 0, false
 		}
 		return m, nil
+	case actHistory:
+		return m, m.openHistory()
 	default:
 	}
 	if m.tab == tabInstalled {
@@ -307,7 +304,7 @@ func (m *model) listAction(a action) (tea.Model, tea.Cmd) {
 
 func (m *model) quit() (tea.Model, tea.Cmd) {
 	if m.busy != "" {
-		m.setStatus(m.busy+" is still running; wait for it, or press ctrl+c to abort it", true)
+		m.setStatus(m.busy+" is still running; wait for it, or press ctrl+c to cancel it", true)
 		return m, nil
 	}
 	return m, tea.Quit
@@ -375,11 +372,19 @@ func (m *model) rollback(p herdr.InstalledPluginInfo) tea.Cmd {
 	return m.planRollback(p)
 }
 
+// toggle enables or disables p. It waits for a running operation: herdr
+// rewrites its plugin list as it installs, and an install over p leaves it
+// enabled or disabled as it was before, undoing a change made meanwhile.
 func (m *model) toggle(p herdr.InstalledPluginInfo) tea.Cmd {
 	if p.Enabled && p.PluginID == m.opts.SelfID {
 		m.setStatus(manager.ErrSelf.Error(), true)
 		return nil
 	}
+	if m.busy != "" {
+		m.setStatus(m.busy+" is still running; enable or disable plugins once it ends", true)
+		return nil
+	}
+	m.toggling++
 	return m.setEnabled(p.PluginID, !p.Enabled)
 }
 
@@ -519,6 +524,8 @@ func changeKey(d *detail) (a action, verb string) {
 	return actInstall, changeVerbs[d.change.kind][0]
 }
 
+// keyOutput scrolls the output; moving to its end follows what herdr still
+// prints. Any other key goes back, leaving a running operation running.
 func (m *model) keyOutput(a action) (tea.Model, tea.Cmd) {
 	switch a {
 	case actUp:
@@ -529,20 +536,38 @@ func (m *model) keyOutput(a action) (tea.Model, tea.Cmd) {
 		m.outputOffset = max(m.outputOffset-m.bodyHeight(), 0)
 	case actPageDown:
 		m.outputOffset += m.bodyHeight()
+	case actRetry:
+		if p := m.page; m.live == nil && p != nil && p.retry != nil {
+			if !m.idle() {
+				return m, nil
+			}
+			m.page = nil
+			return m, p.retry()
+		}
+		fallthrough
 	default:
 		m.screen = screenList
+		if p := m.page; m.live == nil && p != nil && p.back == screenHistory && m.history != nil {
+			m.screen = screenHistory
+		}
+		return m, nil
 	}
+	m.outputFollow = m.outputOffset >= m.outputMax
 	return m, nil
 }
 
 // idle reports whether a new operation may start, explaining why not on the
 // status line.
 func (m *model) idle() bool {
-	if m.busy == "" {
-		return true
+	switch {
+	case m.busy != "":
+		m.setStatus(m.busy+" is still running", true)
+		return false
+	case m.toggling > 0:
+		m.setStatus("A plugin is still being enabled or disabled", true)
+		return false
 	}
-	m.setStatus(m.busy+" is still running", true)
-	return false
+	return true
 }
 
 func (m *model) openInstalled(p herdr.InstalledPluginInfo) tea.Cmd {

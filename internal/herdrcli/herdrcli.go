@@ -13,6 +13,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/vika2603/herdr-client/herdr"
@@ -118,14 +120,54 @@ func (r Runner) run(ctx context.Context, args []string, out io.Writer) error {
 	return nil
 }
 
-func (r Runner) command(ctx context.Context, args []string) *exec.Cmd {
+// killDelay is how long a cancelled herdr command and the build it runs have
+// to stop after the interrupt before they are killed.
+const killDelay = 5 * time.Second
+
+// command is herdr with args, run in a process group of its own. herdr
+// neither handles an interrupt nor passes it on, so on cancellation the
+// whole group is interrupted, which reaches the build commands herdr runs,
+// and killed once killDelay passes. The group also keeps a terminal's
+// ctrl+c from reaching herdr before this process decides what to do.
+func (r Runner) command(ctx context.Context, args []string) *groupCmd {
 	cmd := exec.CommandContext(ctx, r.bin(), args...) //nolint:gosec // The herdr binary herdr itself names, or herdr on PATH, with fixed subcommands.
 	cmd.Env = commandEnv(os.Environ())
-	// Interrupt rather than kill on cancellation, so herdr and the build it
-	// runs get a chance to stop cleanly.
-	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	g := &groupCmd{Cmd: cmd}
+	cmd.Cancel = g.interrupt
 	cmd.WaitDelay = 10 * time.Second
-	return cmd
+	return g
+}
+
+// groupCmd is a command leading its own process group.
+type groupCmd struct {
+	*exec.Cmd
+	mu     sync.Mutex
+	exited bool
+}
+
+// interrupt sends the group an interrupt, and a kill after killDelay unless
+// the command has exited by then.
+func (g *groupCmd) interrupt() error {
+	pgid := g.Process.Pid
+	time.AfterFunc(killDelay, func() {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		if !g.exited {
+			_ = syscall.Kill(-pgid, syscall.SIGKILL)
+		}
+	})
+	return syscall.Kill(-pgid, syscall.SIGINT)
+}
+
+// Run runs the command. Once it has exited its process group id may be
+// reused, so no kill is sent after that.
+func (g *groupCmd) Run() error {
+	err := g.Cmd.Run()
+	g.mu.Lock()
+	g.exited = true
+	g.mu.Unlock()
+	return err
 }
 
 // commandEnv drops the plugin invocation variables herdr gave this process.
@@ -142,15 +184,22 @@ func commandEnv(environ []string) []string {
 	return out
 }
 
-// ExitError is a herdr command that ran and failed.
+// ExitError is a herdr command that ran and failed: it exited with Code, or
+// a signal stopped it.
 type ExitError struct {
 	Args   []string
 	Code   int
+	Signal os.Signal
 	Output string
 }
 
 func (e *ExitError) Error() string {
-	msg := fmt.Sprintf("%s exited with status %d", strings.Join(e.Args, " "), e.Code)
+	cmd := strings.Join(e.Args, " ")
+	if e.Signal != nil {
+		// What herdr printed up to the signal is not why it stopped.
+		return fmt.Sprintf("%s was stopped by signal %s", cmd, e.Signal)
+	}
+	msg := fmt.Sprintf("%s exited with status %d", cmd, e.Code)
 	if e.Output != "" {
 		msg += ": " + e.Output
 	}
@@ -159,7 +208,11 @@ func (e *ExitError) Error() string {
 
 func commandError(args []string, err error, output string) error {
 	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
-		return &ExitError{Args: args, Code: exitErr.ExitCode(), Output: strings.TrimSpace(output)}
+		e := &ExitError{Args: args, Code: exitErr.ExitCode(), Output: strings.TrimSpace(output)}
+		if ws, ok := exitErr.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+			e.Signal = ws.Signal()
+		}
+		return e
 	}
 	return fmt.Errorf("run %s: %w", strings.Join(args, " "), err)
 }

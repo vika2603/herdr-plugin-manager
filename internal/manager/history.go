@@ -13,6 +13,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/vika2603/herdr-plugin-manager/internal/safe"
 )
 
 // historyFile is the change log's name in the history directory.
@@ -66,6 +68,36 @@ type TargetRecord struct {
 
 // Failed reports whether the change failed.
 func (e Entry) Failed() bool { return e.Error != "" }
+
+// StateChange is the plugin's state before and after the change, on one
+// line.
+func (e Entry) StateChange() string {
+	return stateLabel(e.Before, false) + " -> " + stateLabel(e.After, e.AfterUnknown)
+}
+
+// Details are the change's target, the plugin's state before and after it,
+// and its error, a line each.
+func (e Entry) Details() []string {
+	var out []string
+	if e.Target != nil {
+		out = append(out, "target: "+e.Target.Source+" @ "+RevisionLabel(e.Target.Ref, e.Target.Commit))
+	}
+	out = append(out, "before: "+stateLabel(e.Before, false), "after: "+stateLabel(e.After, e.AfterUnknown))
+	if e.Failed() {
+		out = append(out, "error: "+safe.Text(e.Error))
+	}
+	return out
+}
+
+func stateLabel(s *State, unknown bool) string {
+	switch {
+	case unknown:
+		return "unknown"
+	case s == nil:
+		return "not installed"
+	}
+	return s.String()
+}
 
 // Result is how the change ended, in a word: done, failed, cancelled, or
 // unconfirmed when the plugin's state afterwards is not known.

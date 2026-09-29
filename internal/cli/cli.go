@@ -549,7 +549,7 @@ func (c *cli) pending(checked []manager.Checked, named bool, exclude []string) [
 // failed, or an error when the run had to stop. Once ctx is cancelled, as by
 // ctrl+c, the updates not yet started are not run.
 func (c *cli) applyReviews(ctx context.Context, reviews []manager.Review, yes bool) (failed, stop error) {
-	var ids, notRun []string
+	var ids, interrupted, notRun []string
 	for _, r := range reviews {
 		id := r.Checked.Plugin.PluginID
 		switch {
@@ -559,22 +559,20 @@ func (c *cli) applyReviews(ctx context.Context, reviews []manager.Review, yes bo
 			notRun = append(notRun, id)
 			continue
 		}
-		ok, err := c.applyReview(ctx, r, yes)
-		if err != nil {
+		applyErr, err := c.applyReview(ctx, r, yes)
+		switch {
+		case err != nil:
 			return nil, err
-		}
-		if !ok {
+		case errors.Is(applyErr, manager.ErrCancelled):
+			interrupted = append(interrupted, id)
+		case applyErr != nil:
 			ids = append(ids, id)
 		}
 	}
-	var errs []error
-	if len(ids) > 0 {
-		errs = append(errs, fmt.Errorf("not updated: %s", strings.Join(ids, ", ")))
+	if again := slices.Concat(ids, interrupted, notRun); len(again) > 0 {
+		fmt.Fprintf(c.errOut, "to try them again: %s update %s\n", app.Name, strings.Join(again, " "))
 	}
-	if len(notRun) > 0 {
-		errs = append(errs, fmt.Errorf("%w; not started: %s", manager.ErrCancelled, strings.Join(notRun, ", ")))
-	}
-	return errors.Join(errs...), nil
+	return manager.BatchError(ids, interrupted, notRun), nil
 }
 
 // printPlan lists the updates about to be reviewed, one line each.
@@ -613,26 +611,25 @@ func (c *cli) printReview(r manager.Review) {
 	}
 }
 
-// applyReview applies one reviewed update. It reports false for an update
-// that could not be applied, and returns an error only when the whole run
-// must stop, such as a confirmation stdin cannot answer. A declined update
-// counts as handled.
-func (c *cli) applyReview(ctx context.Context, r manager.Review, yes bool) (bool, error) {
+// applyReview applies one reviewed update, returning why it could not be
+// applied. err is set only when the whole run must stop, such as for a
+// confirmation stdin cannot answer. A declined update counts as handled.
+func (c *cli) applyReview(ctx context.Context, r manager.Review, yes bool) (applyErr, err error) {
 	id := r.Checked.Plugin.PluginID
 	if err := c.confirm(yes, "\nUpdate "+id+"?"); err != nil {
 		if errors.Is(err, errCancelled) {
-			return true, nil
+			return nil, nil
 		}
-		return false, err
+		return nil, err
 	}
 	fmt.Fprintf(c.out, "\nUpdating %s\n", id)
 	o := c.m.Apply(ctx, r.Change(), c.out)
 	if err := o.Error(); err != nil {
 		fmt.Fprintf(c.errOut, "%v\n", err)
-		return false, nil
+		return err, nil
 	}
 	fmt.Fprintln(c.out, o.Summary())
-	return true, nil
+	return nil, nil
 }
 
 func plural(n int, noun string) string {
@@ -838,7 +835,7 @@ func (c *cli) historyCmd() *cobra.Command {
 			tw := c.table()
 			fmt.Fprintln(tw, "ENTRY\tTIME\tKIND\tPLUGIN\tRESULT\tCHANGE")
 			for _, e := range entries {
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", e.ID, e.Time.Local().Format(time.DateTime), e.Kind, e.Plugin, e.Result(), change(e))
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", e.ID, e.Time.Local().Format(time.DateTime), e.Kind, e.Plugin, e.Result(), e.StateChange())
 			}
 			return tw.Flush()
 		},
@@ -856,13 +853,8 @@ func (c *cli) showEntry(entries []manager.Entry, id string) error {
 	}
 	e := entries[i]
 	fmt.Fprintf(c.out, "%s %s %s\n", e.Time.Local().Format(time.DateTime), e.Kind, e.Plugin)
-	if e.Target != nil {
-		fmt.Fprintf(c.out, "target: %s @ %s\n", e.Target.Source, manager.RevisionLabel(e.Target.Ref, e.Target.Commit))
-	}
-	fmt.Fprintln(c.out, "before: "+stateLabel(e.Before, false))
-	fmt.Fprintln(c.out, "after: "+stateLabel(e.After, e.AfterUnknown))
-	if e.Failed() {
-		fmt.Fprintln(c.out, "error: "+safe.Text(e.Error))
+	for _, line := range e.Details() {
+		fmt.Fprintln(c.out, line)
 	}
 	if e.Log == "" {
 		return nil
@@ -874,21 +866,6 @@ func (c *cli) showEntry(entries []manager.Entry, id string) error {
 	fmt.Fprintln(c.out, "\nOutput:")
 	fmt.Fprintln(c.out, safe.Text(log))
 	return nil
-}
-
-// change is an entry's before and after, on one line.
-func change(e manager.Entry) string {
-	return stateLabel(e.Before, false) + " -> " + stateLabel(e.After, e.AfterUnknown)
-}
-
-func stateLabel(s *manager.State, unknown bool) string {
-	switch {
-	case unknown:
-		return "unknown"
-	case s == nil:
-		return "not installed"
-	}
-	return s.String()
 }
 
 func (c *cli) logsCmd() *cobra.Command {

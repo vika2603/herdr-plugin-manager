@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vika2603/herdr-client/herdr"
 
@@ -46,6 +47,9 @@ type harness struct {
 	// afterInstallFile, once written, replaces the plugin list when herdr
 	// installs a plugin.
 	afterInstallFile string
+	// blockFile lists the sources whose install waits until herdr is
+	// interrupted.
+	blockFile string
 	// manifestIDs maps "owner/repo" to the id its manifest declares.
 	manifestIDs map[string]string
 }
@@ -60,11 +64,13 @@ func newHarness(t *testing.T) *harness {
 	callsFile := filepath.Join(dir, "calls.txt")
 	h.listFile = filepath.Join(dir, "list.json")
 	h.afterInstallFile = filepath.Join(dir, "after-install.json")
+	h.blockFile = filepath.Join(dir, "block")
 	h.setInstalled(noneYet)
 	script := "#!/bin/sh\necho \"$*\" >> " + callsFile + "\ncase \"$*\" in\n" +
 		"--version) echo 'herdr 0.9.1' ;;\n" +
 		"'plugin list --json') cat " + h.listFile + " ;;\n" +
-		"'plugin install '*) if [ -f " + h.afterInstallFile + " ]; then cp " + h.afterInstallFile + " " + h.listFile + "; fi ;;\nesac\n"
+		"'plugin install '*) if [ -f " + h.blockFile + " ] && grep -qx \"$3\" " + h.blockFile + "; then exec sleep 30; fi\n" +
+		"  if [ -f " + h.afterInstallFile + " ]; then cp " + h.afterInstallFile + " " + h.listFile + "; fi ;;\nesac\n"
 	bin := filepath.Join(dir, "herdr")
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -126,11 +132,15 @@ func (h *harness) setInstalled(listJSON string) {
 
 // run executes one command line. interactive answers prompts from stdin.
 func (h *harness) run(stdin string, interactive bool, args ...string) (stdout, stderr string, err error) {
+	return h.runContext(context.Background(), stdin, interactive, args...)
+}
+
+func (h *harness) runContext(ctx context.Context, stdin string, interactive bool, args ...string) (stdout, stderr string, err error) {
 	var out, errOut bytes.Buffer
 	c := &cli{m: h.m, in: strings.NewReader(stdin), out: &out, errOut: &errOut, interactive: interactive}
 	root := c.root(nil)
 	root.SetArgs(args)
-	err = root.ExecuteContext(context.Background())
+	err = root.ExecuteContext(ctx)
 	return out.String(), errOut.String(), err
 }
 
@@ -593,5 +603,56 @@ func TestUpdateDryRun(t *testing.T) {
 	}
 	if h.ran("plugin install") {
 		t.Errorf("a dry run installed: %q", h.calls())
+	}
+}
+
+func TestCancellingAnUpdateOfARun(t *testing.T) {
+	tests := []struct {
+		name, block string
+		args        []string
+		want        []string
+		installs    int
+	}{
+		{"the first of two", "o/a", nil, []string{"interrupted: o.a", "not started: o.c"}, 1},
+		{"the last of two", "o/c", nil, []string{"interrupted: o.c"}, 2},
+		{"the only one", "o/c", []string{"o.c"}, []string{"interrupted: o.c"}, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newTwoUpdates(t)
+			if err := os.WriteFile(h.blockFile, []byte(tt.block+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			go func() {
+				for !h.ran("plugin install " + tt.block) {
+					time.Sleep(10 * time.Millisecond)
+				}
+				cancel()
+			}()
+			_, stderr, err := h.runContext(ctx, "", false, append([]string{"update", "--yes"}, tt.args...)...)
+			if !errors.Is(err, manager.ErrCancelled) {
+				t.Fatalf("err = %v, want it cancelled", err)
+			}
+			for _, w := range tt.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Errorf("err = %v, want %q", err, w)
+				}
+			}
+			if strings.Contains(err.Error(), "not updated") {
+				t.Errorf("err = %v; the interrupted update is reported as failed", err)
+			}
+			installs := slices.DeleteFunc(h.calls(), func(c string) bool { return !strings.HasPrefix(c, "plugin install") })
+			if len(installs) != tt.installs {
+				t.Errorf("installs = %q, want %d started", installs, tt.installs)
+			}
+			if !strings.Contains(stderr, "to try them again: hpm update") {
+				t.Errorf("stderr does not say how to try again:\n%s", stderr)
+			}
+			out, _, err := h.run("", false, "history")
+			if err != nil || !strings.Contains(out, "cancelled") {
+				t.Errorf("history does not record the cancelled update (%v):\n%s", err, out)
+			}
+		})
 	}
 }

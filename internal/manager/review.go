@@ -2,6 +2,8 @@ package manager
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"sync"
 )
@@ -70,4 +72,25 @@ func (m *Manager) ReviewAll(ctx context.Context, list []Checked, herdrVersion st
 	}
 	wg.Wait()
 	return out
+}
+
+// BatchError says how a run of several changes fell short: the plugins whose
+// change failed, those whose change was interrupted by a cancellation, and
+// those not started after it. It is nil when none did.
+func BatchError(failed, interrupted, notStarted []string) error {
+	var errs []error
+	if len(failed) > 0 {
+		errs = append(errs, fmt.Errorf("not updated: %s", strings.Join(failed, ", ")))
+	}
+	var parts []string
+	if len(interrupted) > 0 {
+		parts = append(parts, "interrupted: "+strings.Join(interrupted, ", "))
+	}
+	if len(notStarted) > 0 {
+		parts = append(parts, "not started: "+strings.Join(notStarted, ", "))
+	}
+	if len(parts) > 0 {
+		errs = append(errs, fmt.Errorf("%w; %s", ErrCancelled, strings.Join(parts, "; ")))
+	}
+	return errors.Join(errs...)
 }
