@@ -31,9 +31,9 @@ func (r Review) Blocker() string {
 	return ""
 }
 
-// Change is the change that applies the update as reviewed: herdr is asked
-// for the checked ref. Apply refuses it when the ref no longer points at the
-// commit whose manifest was shown, and reports another commit installed.
+// Change is the change that applies the update as reviewed: the plugin
+// follows the checked ref, and herdr is asked for the commit whose manifest
+// was shown.
 func (r Review) Change() Change {
 	p := r.Checked.Plugin
 	return Change{

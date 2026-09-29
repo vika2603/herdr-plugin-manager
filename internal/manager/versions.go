@@ -83,10 +83,11 @@ func (t Tracking) Describe() string {
 // ErrLocal is returned for a version change of a locally linked plugin.
 var ErrLocal = errors.New("the plugin is linked locally; change its working tree instead")
 
-// VersionRef is the ref a version change of p asks herdr for. ref is the
-// user's choice: the version for a switch, and for an unpin what to follow
-// then, where empty follows what an install would pick. A pin holds the
-// installed commit, and a reinstall asks for the installed ref again.
+// VersionRef is the ref a version change of p follows once it is made. ref
+// is the user's choice: the version for a switch, and for an unpin what to
+// follow then, where empty follows what an install would pick. A pin holds
+// the installed commit, and a reinstall keeps the ref the plugin follows,
+// at the installed commit; ReinstallCommit names that commit.
 func VersionRef(p herdr.InstalledPluginInfo, kind ChangeKind, ref string) (string, error) {
 	t := TrackingOf(p)
 	if t.Kind == TrackLocal {
@@ -118,16 +119,10 @@ func VersionRef(p herdr.InstalledPluginInfo, kind ChangeKind, ref string) (strin
 	return "", fmt.Errorf("%s is not a version change", kind)
 }
 
-// RequireInstalledCommit records a problem when a reinstall's preview is not
-// the installed commit: the ref has moved on, so reinstalling it would
-// update the plugin.
-func (p *Preview) RequireInstalledCommit(installed herdr.InstalledPluginInfo) {
-	t := TrackingOf(installed)
-	if p.Commit == t.Commit {
-		return
-	}
-	p.Problems = append(p.Problems, fmt.Sprintf("%s now points at %s, not the installed %s, so reinstalling it would update the plugin; update it, or pin it to reinstall the installed commit",
-		RevisionLabel(t.Ref, ""), shortHash(p.Commit), shortHash(t.Commit)))
+// ReinstallCommit is the commit a reinstall of p installs again, "" when
+// herdr recorded none.
+func ReinstallCommit(p herdr.InstalledPluginInfo) string {
+	return TrackingOf(p).Commit
 }
 
 // Versions are what a plugin's repository offers to install.

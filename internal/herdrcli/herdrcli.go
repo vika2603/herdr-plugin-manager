@@ -34,8 +34,9 @@ func (r Runner) bin() string {
 // Install runs `herdr plugin install src [--ref ref] --yes`, writing herdr's
 // output to out. herdr clones the repository, runs the manifest's build
 // commands and registers the plugin; the preview it would show interactively
-// is expected to have been shown by the caller. A reinstall replaces the
-// managed checkout and registers the plugin as enabled.
+// is expected to have been shown by the caller. herdr records ref as given,
+// so a commit is recorded as a pin. A reinstall replaces the managed checkout
+// and registers the plugin as enabled.
 func (r Runner) Install(ctx context.Context, src, ref string, out io.Writer) error {
 	args := []string{"plugin", "install", src}
 	if ref != "" {

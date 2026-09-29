@@ -462,10 +462,9 @@ func (c *cli) updateCmd() *cobra.Command {
 		Long: "Update the given plugins, or every plugin with an update. herdr has no update\n" +
 			"command, so each plugin is reinstalled at its new target. The updates are\n" +
 			"listed first, then each is shown in full: what changes, its release notes or\n" +
-			"commits, and the new manifest, whose build commands run again. Right before\n" +
-			"each install its ref is checked against the commit shown, and herdr's record\n" +
-			"after it; herdr fetches the ref itself, so a push in between is found only\n" +
-			"after the build commands ran, and is reported.\n\n" +
+			"commits, and the new manifest, whose build commands run again. herdr is asked\n" +
+			"for the commit shown, so what builds is what was shown, whatever the ref\n" +
+			"points at by then.\n\n" +
 			"A disabled plugin stays disabled, which needs a running herdr server; without\n" +
 			"one it is not updated. Each update reports the plugin's state after it.\n" +
 			"Plugins whose check succeeded are still updated when others fail; the command\n" +
@@ -671,9 +670,8 @@ var versionCmds = map[manager.ChangeKind]struct {
 	},
 	manager.KindReinstall: {
 		"reinstall <plugin-id>", "Reinstall a plugin at the version it is installed at",
-		"Reinstall a plugin from the ref it was installed from, running its build\n" +
-			"commands again. It is refused when that ref has moved on, since reinstalling\n" +
-			"it would update the plugin; pin the plugin to reinstall the installed commit.",
+		"Reinstall a plugin at the commit it is installed at, running its build\n" +
+			"commands again. It keeps following what it follows.",
 		cobra.ExactArgs(1),
 	},
 }
@@ -704,14 +702,16 @@ func (c *cli) versionCmd(kind manager.ChangeKind) *cobra.Command {
 				return err
 			}
 			src, _ := source.FromInstalled(*p)
-			preview, err := c.m.Preview(ctx, src, ref, "", c.m.HerdrVersion(ctx), nil)
+			var preview *manager.Preview
+			if kind == manager.KindReinstall {
+				preview, err = c.m.PreviewAt(ctx, src, ref, manager.ReinstallCommit(*p), c.m.HerdrVersion(ctx), nil)
+			} else {
+				preview, err = c.m.Preview(ctx, src, ref, "", c.m.HerdrVersion(ctx), nil)
+			}
 			if err != nil {
 				return err
 			}
 			preview.RequireID(id)
-			if kind == manager.KindReinstall {
-				preview.RequireInstalledCommit(*p)
-			}
 			fmt.Fprintf(c.out, "%s now: %s; %s\n\n", id, manager.StateOf(*p), manager.TrackingOf(*p).Describe())
 			printSections(c.out, c.m.Explain(ctx, *p, preview).Sections())
 			fmt.Fprintln(c.out)
@@ -746,9 +746,9 @@ func (c *cli) rollbackCmd() *cobra.Command {
 		Short: "Undo the last change this manager made to a plugin",
 		Long: "Take a plugin back to where it was before the last install, update or other\n" +
 			"change recorded in the history, enabled or disabled as it was. An install is\n" +
-			"undone by uninstalling. The earlier revision is reinstalled, so its manifest is\n" +
-			"shown first; when its branch or tag has moved on since, the plugin is pinned to\n" +
-			"the earlier commit. A plugin changed outside this manager is left alone.",
+			"undone by uninstalling. The earlier commit is reinstalled, so its manifest is\n" +
+			"shown first, and the plugin follows the ref it followed then. A plugin changed\n" +
+			"outside this manager is left alone.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()

@@ -285,6 +285,10 @@ func (m *model) openChange(p herdr.InstalledPluginInfo, kind manager.ChangeKind,
 	}
 	src, _ := source.FromInstalled(p)
 	c := &pendingChange{kind: kind, plugin: p, target: manager.Target{Source: src, Ref: ref}, fromPreview: true}
+	if kind == manager.KindReinstall {
+		// A reinstall is of the installed commit, which its preview shows.
+		c.target.Commit, c.fromPreview = manager.ReinstallCommit(p), false
+	}
 	d := &detail{crumb: tabNames[tabInstalled], title: changeVerbs[kind][2] + " " + p.Name, loading: true, change: c}
 	m.detail, m.screen = d, screenDetail
 	return m.withSpinner(m.loadPreview(d, src, ref, ""))

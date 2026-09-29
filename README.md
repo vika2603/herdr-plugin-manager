@@ -52,10 +52,14 @@ terminal. Press `?` for every key; the mouse scrolls, and a click selects,
 then opens. `i` installs from the preview, which shows what the plugin runs.
 `U` reviews every available update before any runs: what each changes, and
 why one cannot run here. `space` leaves an update out, `enter` shows it in
-full, and `u` applies the rest. Right before each install its ref is checked
-against the commit reviewed, and herdr's record after it; herdr fetches the
-ref itself, so a push in between is found only after the build commands ran,
-and is reported.
+full, and `u` applies the rest.
+
+Every install, update and version change asks herdr for the commit its
+preview showed, so the build commands that run are the ones reviewed, even
+when the branch or tag has moved on since. herdr records such a plugin as
+pinned to that commit, as `herdr plugin list` shows; hpm keeps the ref it
+follows in its state directory, and checks that ref for updates. A plugin
+installed again outside hpm follows what herdr records.
 
 On an installed plugin, `v` lists its versions to switch to, and reinstalls,
 pins or unpins it; `z` rolls back the last change. The preview of an update

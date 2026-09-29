@@ -201,7 +201,7 @@ func TestInstallAsksFirst(t *testing.T) {
 	if _, _, err := h.run("", false, "install", "carol.gadget", "--yes"); err != nil {
 		t.Fatal(err)
 	}
-	if !h.ran("plugin install carol/gadget --yes") {
+	if !h.ran("plugin install carol/gadget --ref " + head + " --yes") {
 		t.Errorf("herdr was not asked to install: %q", h.calls())
 	}
 }
@@ -217,7 +217,7 @@ func TestInstallTakesTheReleaseThePreviewShowed(t *testing.T) {
 	if !strings.Contains(out, "@ v0.2.0") {
 		t.Errorf("the preview does not name the release:\n%s", out)
 	}
-	if !h.ran("plugin install carol/gadget --ref v0.2.0 --yes") {
+	if !h.ran("plugin install carol/gadget --ref " + head + " --yes") {
 		t.Errorf("herdr was not asked for the release: %q", h.calls())
 	}
 }
@@ -377,7 +377,7 @@ func TestUpdateReportsFailedChecks(t *testing.T) {
 		if !strings.Contains(stderr, "check failed: o.b:") {
 			t.Errorf("stderr lacks the failure:\n%s", stderr)
 		}
-		if !h.ran("plugin install o/a --yes") {
+		if !h.ran("plugin install o/a --ref " + head + " --yes") {
 			t.Errorf("the plugin that could be checked was not updated: %q", h.calls())
 		}
 	})
@@ -394,7 +394,7 @@ func TestUpdateReportsFailedChecks(t *testing.T) {
 		if _, _, err := h.run("", false, "update", "--yes"); err != nil {
 			t.Errorf("err = %v", err)
 		}
-		if !h.ran("plugin install o/a --yes") {
+		if !h.ran("plugin install o/a --ref " + head + " --yes") {
 			t.Errorf("o.a was not updated: %q", h.calls())
 		}
 		out, _, err := h.run("", false, "update", "--yes")
@@ -431,7 +431,7 @@ func TestUpdateThenRollBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rollback: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "will be pinned to that commit") || !strings.Contains(out, "Build commands") {
+	if !strings.Contains(out, "back to 1 at default branch (aaaaaaaaaaaa), enabled") || !strings.Contains(out, "Build commands") {
 		t.Errorf("the rollback was not explained and previewed:\n%s", out)
 	}
 	if !h.ran("plugin install o/a --ref " + older + " --yes") {
@@ -475,7 +475,7 @@ func TestVersionChanges(t *testing.T) {
 		if !strings.Contains(out, "updates: follows new releases, installed at v0.2.0") {
 			t.Errorf("the preview does not say how the plugin will be updated:\n%s", out)
 		}
-		if !h.ran("plugin install o/a --ref v0.2.0 --yes") {
+		if !h.ran("plugin install o/a --ref " + head + " --yes") {
 			t.Errorf("calls = %q", h.calls())
 		}
 	})
@@ -501,7 +501,7 @@ func TestVersionChanges(t *testing.T) {
 		if _, _, err := h.run("", false, "unpin", "o.a", "--yes"); err != nil {
 			t.Fatal(err)
 		}
-		if !h.ran("plugin install o/a --yes") {
+		if !h.ran("plugin install o/a --ref " + head + " --yes") {
 			t.Errorf("calls = %q", h.calls())
 		}
 	})
@@ -511,14 +511,18 @@ func TestVersionChanges(t *testing.T) {
 			t.Errorf("err = %v", err)
 		}
 	})
-	t.Run("reinstall is refused when the ref moved on", func(t *testing.T) {
+	t.Run("reinstall keeps the installed commit when the ref moved on", func(t *testing.T) {
 		h := newCheckHarness(t)
+		h.installs(pluginAt(older, older))
 		out, _, err := h.run("", false, "reinstall", "o.a", "--yes")
-		if err == nil || !strings.Contains(out, "reinstalling it would update the plugin") {
-			t.Errorf("err = %v\n%s", err, out)
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
 		}
-		if h.ran("plugin install") {
-			t.Errorf("reinstalled at another commit: %q", h.calls())
+		if !h.ran("plugin install o/a --ref " + older + " --yes") {
+			t.Errorf("not reinstalled at the installed commit: %q", h.calls())
+		}
+		if out, _, _ := h.run("", false, "info", "o.a"); !strings.Contains(out, "updates: follows the default branch") {
+			t.Errorf("the reinstall did not keep following the default branch:\n%s", out)
 		}
 	})
 	t.Run("reinstall at the installed commit", func(t *testing.T) {
@@ -528,7 +532,7 @@ func TestVersionChanges(t *testing.T) {
 		if _, _, err := h.run("", false, "reinstall", "o.a", "--yes"); err != nil {
 			t.Fatal(err)
 		}
-		if !h.ran("plugin install o/a --yes") {
+		if !h.ran("plugin install o/a --ref " + head + " --yes") {
 			t.Errorf("calls = %q", h.calls())
 		}
 	})
@@ -555,7 +559,7 @@ func TestUpdateListsThePlanFirst(t *testing.T) {
 	if plan < 0 || first < plan || !strings.Contains(out[plan:first], "o.a  New commits on the default branch; version 1 -> 0.2.0") {
 		t.Errorf("the plan does not come first, one line each:\n%s", out)
 	}
-	if !h.ran("plugin install o/a --yes") || !h.ran("plugin install o/c --yes") {
+	if !h.ran("plugin install o/a --ref "+head+" --yes") || !h.ran("plugin install o/c --ref "+head+" --yes") {
 		t.Errorf("calls = %q", h.calls())
 	}
 }
@@ -569,7 +573,7 @@ func TestUpdateExcludes(t *testing.T) {
 	if !strings.Contains(out, "o.c: excluded") || strings.Contains(out, "== o.c") {
 		t.Errorf("o.c was not left out:\n%s", out)
 	}
-	if !h.ran("plugin install o/a --yes") || h.ran("plugin install o/c") {
+	if !h.ran("plugin install o/a --ref "+head+" --yes") || h.ran("plugin install o/c") {
 		t.Errorf("calls = %q", h.calls())
 	}
 	if _, _, err := h.run("", false, "update", "--exclude", "o.nope"); err == nil || !strings.Contains(err.Error(), `--exclude: plugin "o.nope" is not installed`) {

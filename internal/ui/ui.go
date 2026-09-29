@@ -457,9 +457,6 @@ func (m *model) loadPreview(d *detail, src source.GitHub, ref, hint string) tea.
 		}
 		if err == nil && c != nil {
 			p.RequireID(c.plugin.PluginID)
-			if c.kind == manager.KindReinstall {
-				p.RequireInstalledCommit(c.plugin)
-			}
 		}
 		return previewMsg{d: d, preview: p, err: err}
 	}

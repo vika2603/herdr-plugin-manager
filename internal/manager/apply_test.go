@@ -214,15 +214,61 @@ func TestApplyReportsWhereAFailedInstallLeftThePlugin(t *testing.T) {
 	}
 }
 
-func TestApplyRefusesAMovedSource(t *testing.T) {
-	r := newRegistry(t, true, "", at("v1.0.0", commitV1, true))
-	r.m.Git = headAt(commitV1)
-	o := r.m.Apply(context.Background(), Change{Kind: KindInstall, ID: "o.r", Target: Target{Source: src, Commit: commitV2}}, nil)
-	if !errors.Is(o.Err, ErrMoved) {
-		t.Fatalf("err = %v, want ErrMoved", o.Err)
+func TestApplyInstallsTheCommitThePreviewShowed(t *testing.T) {
+	// The default branch has moved on from the commit previewed; herdr is
+	// asked for that commit, and records it as a pin.
+	r := newRegistry(t, true, "", at("", commitV1, true))
+	r.m.Git = headAt(strings.Repeat("3", 40))
+	r.installs(at(commitV2, commitV2, true))
+	current := at("", commitV1, true)
+	o := r.m.Apply(context.Background(), Change{Kind: KindUpdate, ID: "o.r", Current: &current, Target: Target{Source: src, Commit: commitV2}}, nil)
+	if o.Err != nil {
+		t.Fatal(o.Error())
 	}
-	if r.installed() {
-		t.Errorf("herdr ran although the source moved: %q", r.calls())
+	if !slices.Contains(r.calls(), "plugin install o/r --ref "+commitV2+" --yes") {
+		t.Fatalf("herdr was not asked for the previewed commit: %q", r.calls())
+	}
+	// The plugin still follows the default branch.
+	if o.After == nil || o.After.Ref != "" || o.After.Commit != commitV2 {
+		t.Errorf("after = %+v, want the default branch at the previewed commit", o.After)
+	}
+	plugins, _ := r.m.Installed(context.Background())
+	if tr := TrackingOf(plugins[0]); tr.Kind != TrackDefault || tr.Commit != commitV2 {
+		t.Errorf("tracking = %+v", tr)
+	}
+	res, err := r.m.Check(context.Background(), plugins[0])
+	if err != nil || res.Kind != updates.Available {
+		t.Errorf("the moved branch is not an update: %+v, %v", res, err)
+	}
+}
+
+func TestAFollowOnlyHoldsWhileHerdrKeepsThePin(t *testing.T) {
+	r := newRegistry(t, true, "", at("v1.0.0", commitV1, true))
+	r.m.Git = releases
+	r.installs(at(commitV2, commitV2, true))
+	if o := update(r); o.Err != nil {
+		t.Fatal(o.Error())
+	}
+	plugins, _ := r.m.Installed(context.Background())
+	if got := TrackingOf(plugins[0]).Describe(); got != "follows new releases, installed at v2.0.0" {
+		t.Errorf("tracking = %q", got)
+	}
+	// Installed outside this manager at another ref: herdr's record wins.
+	r.write(r.file, []herdr.InstalledPluginInfo{at("main", commitV2, true)})
+	plugins, _ = r.m.Installed(context.Background())
+	if got := TrackingOf(plugins[0]).Describe(); got != "follows main when it moves" {
+		t.Errorf("tracking = %q", got)
+	}
+	// A pin asked for as such follows nothing.
+	r.write(r.file, []herdr.InstalledPluginInfo{at("v2.0.0", commitV2, true)})
+	r.installs(at(commitV2, commitV2, true))
+	current := at("v2.0.0", commitV2, true)
+	if o := r.m.Apply(context.Background(), Change{Kind: KindPin, ID: "o.r", Current: &current, Target: Target{Source: src, Ref: commitV2, Commit: commitV2}}, nil); o.Err != nil {
+		t.Fatal(o.Error())
+	}
+	plugins, _ = r.m.Installed(context.Background())
+	if got := TrackingOf(plugins[0]).Kind; got != TrackPinned {
+		t.Errorf("after a pin: %v", got)
 	}
 }
 
@@ -284,7 +330,7 @@ func TestRollback(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if u.Remove || u.Pinned || u.Target.Ref != "v1.0.0" || u.Target.Commit != commitV1 || *u.Target.Enabled {
+		if u.Remove || u.Target.Ref != "v1.0.0" || u.Target.Commit != commitV1 || *u.Target.Enabled {
 			t.Fatalf("undo = %+v", u)
 		}
 		r.installs(at("v1.0.0", commitV1, true))
@@ -296,7 +342,7 @@ func TestRollback(t *testing.T) {
 			t.Errorf("after the rollback: %+v", StateOf(got))
 		}
 	})
-	t.Run("a branch that moved on is pinned", func(t *testing.T) {
+	t.Run("a branch that moved on still follows it", func(t *testing.T) {
 		r := newRegistry(t, true, "", at("", commitV1, true))
 		r.m.Git = releases
 		r.installs(at("", commitV2, true))
@@ -308,7 +354,7 @@ func TestRollback(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !u.Pinned || u.Target.Ref != commitV1 || !strings.Contains(u.Describe(), "will be pinned") {
+		if u.Target.Ref != "" || u.Target.Commit != commitV1 {
 			t.Errorf("undo = %+v: %s", u, u.Describe())
 		}
 	})

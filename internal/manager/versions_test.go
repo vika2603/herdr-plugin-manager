@@ -54,11 +54,3 @@ func TestVersionRef(t *testing.T) {
 		}
 	}
 }
-
-func TestRequireInstalledCommit(t *testing.T) {
-	p := &Preview{Commit: commitV2}
-	p.RequireInstalledCommit(at("", commitV1, true))
-	if len(p.Problems) != 1 || !strings.Contains(p.Problems[0], "reinstalling it would update the plugin") {
-		t.Errorf("problems = %q", p.Problems)
-	}
-}

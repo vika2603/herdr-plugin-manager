@@ -216,11 +216,15 @@ const afterTimeout = 10 * time.Second
 // target says. herdr's own output goes to out. The change is recorded in the
 // history, with everything herdr printed.
 //
-// A change is refused before anything runs when the target's ref has moved
-// since its preview, or when the plugin is to end up disabled and no server
-// can disable it after the install. A failed herdr install leaves the plugin
-// as it was; the outcome reads the record again to report what is installed
-// either way.
+// herdr is asked for the target's commit, not its ref, so the build commands
+// that run are those of the manifest the preview showed, whatever the ref
+// points at by then. herdr records that commit as the plugin's ref; unless
+// the target is itself a commit pin, the ref it follows is kept as a Follow.
+//
+// A change is refused before anything runs when the plugin is to end up
+// disabled and no server can disable it after the install. A failed herdr
+// install leaves the plugin as it was; the outcome reads the record again to
+// report what is installed either way.
 func (m *Manager) Apply(ctx context.Context, c Change, out io.Writer) Outcome {
 	if out == nil {
 		out = io.Discard
@@ -274,16 +278,17 @@ func (m *Manager) Apply(ctx context.Context, c Change, out io.Writer) Outcome {
 			return refuse(fmt.Errorf("%w: %w", ErrKeepDisabled, err))
 		}
 	}
-	if err := m.unmoved(ctx, c.Target.Source, c.Target.Ref, c.Target.Commit); err != nil {
-		return refuse(err)
+	ask := c.Target.Commit
+	if ask == "" {
+		ask = c.Target.Ref
 	}
-	installErr := m.CLI.Install(ctx, c.Target.Source.String(), c.Target.Ref, out)
+	installErr := m.CLI.Install(ctx, c.Target.Source.String(), ask, out)
 
 	// The record is read even when ctx was cancelled, to say where the
 	// plugin stands.
 	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), afterTimeout)
 	defer cancel()
-	after, readErr := m.find(readCtx, c.ID)
+	after, readErr := m.recordAfter(readCtx, c, ask, out)
 	if readErr != nil {
 		o.AfterUnknown = true
 	} else if after != nil {
@@ -299,6 +304,42 @@ func (m *Manager) Apply(ctx context.Context, c Change, out io.Writer) Outcome {
 		o.Err = m.settle(readCtx, c, &o, want, readErr)
 	}
 	return done()
+}
+
+// recordAfter reads the plugin's record after an install. When herdr
+// recorded the commit it was asked for, the ref the target follows is kept,
+// or forgotten for a commit pin; the record returned is the plugin as
+// Installed lists it.
+func (m *Manager) recordAfter(ctx context.Context, c Change, asked string, out io.Writer) (*herdr.InstalledPluginInfo, error) {
+	plugins, err := m.installedRaw(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var after *herdr.InstalledPluginInfo
+	for i := range plugins {
+		if plugins[i].PluginID == c.ID {
+			after = &plugins[i]
+		}
+	}
+	if after == nil {
+		return nil, nil //nolint:nilnil // No record: the plugin is not installed.
+	}
+	s := StateOf(*after)
+	if s.Source == c.Target.Source.String() && s.Ref == asked && s.Commit == c.Target.Commit && updates.IsCommit(asked) {
+		var f *Follow
+		if c.Target.Ref != asked {
+			f = &Follow{Source: s.Source, Ref: c.Target.Ref, Commit: asked}
+		}
+		if err := m.History.setFollow(c.ID, f); err != nil {
+			fmt.Fprintf(out, "warning: could not keep the ref %s follows, so it is listed as pinned: %v\n", c.ID, err)
+		}
+	}
+	if follows, err := m.History.follows(); err == nil {
+		list := []herdr.InstalledPluginInfo{*after}
+		applyFollows(list, follows)
+		after = &list[0]
+	}
+	return after, nil
 }
 
 // restoreEnabled leaves the plugin enabled or disabled as wanted when the
@@ -446,6 +487,10 @@ func (m *Manager) uninstall(ctx context.Context, kind ChangeKind, id string, out
 		if err == nil {
 			err = fmt.Errorf("herdr reported success, but %s is still installed", id)
 		}
+	default:
+		if ferr := m.History.setFollow(id, nil); ferr != nil {
+			fmt.Fprintf(out, "warning: could not forget the ref %s followed: %v\n", id, ferr)
+		}
 	}
 	o.Err = err
 	entry := Entry{Kind: kind, Plugin: id, Before: o.Before, After: o.After, AfterUnknown: o.AfterUnknown}
@@ -471,10 +516,6 @@ type Undo struct {
 	// uninstalls it; Target is then unused.
 	Remove bool
 	Target Target
-	// Pinned is set when the earlier revision can only be installed as a
-	// commit pin: its ref has moved on since, so the plugin will no longer
-	// follow that ref until it is unpinned.
-	Pinned bool
 }
 
 // ErrNothingToUndo is returned when no recorded change can be undone.
@@ -513,13 +554,9 @@ func (m *Manager) PlanRollback(ctx context.Context, id string) (Undo, error) {
 		return Undo{}, err
 	}
 	enabled := e.Before.Enabled
+	// The earlier commit is installed as it was, following the ref it
+	// followed then, wherever that ref points now.
 	u.Target = Target{Source: src, Ref: e.Before.Ref, Commit: e.Before.Commit, Enabled: &enabled}
-	if !updates.IsCommit(e.Before.Ref) {
-		now, err := m.resolve(ctx, src, e.Before.Ref)
-		if err != nil || now != e.Before.Commit {
-			u.Target.Ref, u.Pinned = e.Before.Commit, true
-		}
-	}
 	return u, nil
 }
 
@@ -529,11 +566,7 @@ func (u Undo) Describe() string {
 	if u.Remove {
 		return fmt.Sprintf("undo the %s of %s at %s: uninstall it", u.Entry.Kind, u.Entry.Plugin, when)
 	}
-	s := fmt.Sprintf("undo the %s of %s at %s: back to %s", u.Entry.Kind, u.Entry.Plugin, when, u.Entry.Before)
-	if u.Pinned {
-		s += fmt.Sprintf("; %s has moved on, so %s will be pinned to that commit", RevisionLabel(u.Entry.Before.Ref, ""), u.Entry.Plugin)
-	}
-	return s
+	return fmt.Sprintf("undo the %s of %s at %s: back to %s", u.Entry.Kind, u.Entry.Plugin, when, u.Entry.Before)
 }
 
 // Rollback applies u.

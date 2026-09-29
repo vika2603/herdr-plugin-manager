@@ -79,8 +79,22 @@ func serverErr(err error) error {
 
 // Installed lists installed and linked plugins sorted by id. It asks the
 // server, and reads the registry through the herdr command when no server is
-// running.
+// running. A plugin this manager pinned so that herdr built the commit a
+// preview showed is listed with the ref it follows; see Follow.
 func (m *Manager) Installed(ctx context.Context) ([]herdr.InstalledPluginInfo, error) {
+	plugins, err := m.installedRaw(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// Without the kept refs, the pins are shown as herdr records them.
+	if follows, err := m.History.follows(); err == nil {
+		applyFollows(plugins, follows)
+	}
+	return plugins, nil
+}
+
+// installedRaw lists the plugins as herdr records them.
+func (m *Manager) installedRaw(ctx context.Context) ([]herdr.InstalledPluginInfo, error) {
 	var plugins []herdr.InstalledPluginInfo
 	if api, err := m.api(); err == nil {
 		res, err := api.PluginList(ctx, herdr.PluginListParams{})
@@ -192,38 +206,6 @@ func (m *Manager) Logs(ctx context.Context, id string, limit int) ([]herdr.Plugi
 		}
 	}
 	return res.Logs, nil
-}
-
-// ErrMoved is returned when a ref no longer points at the commit that was
-// previewed, so the build commands about to run were never shown.
-var ErrMoved = errors.New("the source changed since its preview; review it again")
-
-// resolve returns the commit ref of src points at now.
-func (m *Manager) resolve(ctx context.Context, src source.GitHub, ref string) (string, error) {
-	if updates.IsCommit(ref) {
-		return ref, nil
-	}
-	refs, err := m.Git.List(ctx, src.CloneURL())
-	if err != nil {
-		return "", err
-	}
-	commit, ok := refs.Resolve(ref)
-	if !ok {
-		return "", fmt.Errorf("%s has no ref %q", src.Repository(), ref)
-	}
-	return commit, nil
-}
-
-// unmoved checks that ref still points at commit.
-func (m *Manager) unmoved(ctx context.Context, src source.GitHub, ref, commit string) error {
-	now, err := m.resolve(ctx, src, ref)
-	if err != nil {
-		return err
-	}
-	if now != commit {
-		return fmt.Errorf("%w (%s was %.12s, is now %.12s)", ErrMoved, src, commit, now)
-	}
-	return nil
 }
 
 // Check compares one installed plugin with its remote. For a plugin in a
