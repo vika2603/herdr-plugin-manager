@@ -25,8 +25,8 @@ const (
 )
 
 // History is the log of changes the manager made to installed plugins, one
-// JSON object per line. The popup and the command line share it, so each
-// entry is appended with a single write.
+// JSON object per line. The popup and the command line share it, so its
+// files change only under the directory's lock.
 type History struct {
 	// Dir holds the log; empty keeps no history.
 	Dir string
@@ -81,9 +81,11 @@ func (h *History) add(e *Entry) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(h.Dir, 0o700); err != nil {
+	unlock, err := h.lock()
+	if err != nil {
 		return err
 	}
+	defer unlock()
 	path := filepath.Join(h.Dir, historyFile)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // The log in the history directory.
 	if err != nil {

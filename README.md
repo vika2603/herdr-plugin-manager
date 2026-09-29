@@ -58,8 +58,9 @@ Every install, update and version change asks herdr for the commit its
 preview showed, so the build commands that run are the ones reviewed, even
 when the branch or tag has moved on since. herdr records such a plugin as
 pinned to that commit, as `herdr plugin list` shows; hpm keeps the ref it
-follows in its state directory, and checks that ref for updates. A plugin
-installed again outside hpm follows what herdr records.
+follows in its state directory, and checks that ref for updates. A change
+whose ref could not be kept there fails and says how the plugin is followed
+instead. A plugin installed again outside hpm follows what herdr records.
 
 On an installed plugin, `v` lists its versions to switch to, and reinstalls,
 pins or unpins it; `z` rolls back the last change. The preview of an update

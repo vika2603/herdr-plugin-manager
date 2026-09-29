@@ -57,6 +57,11 @@ func (h *History) setFollow(id string, f *Follow) error {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	unlock, err := h.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	all, err := h.follows()
 	if err != nil {
 		return err
@@ -71,9 +76,6 @@ func (h *History) setFollow(id string, f *Follow) error {
 	}
 	data, err := json.MarshalIndent(all, "", "  ")
 	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(h.Dir, 0o700); err != nil {
 		return err
 	}
 	tmp := h.followsPath() + ".tmp"

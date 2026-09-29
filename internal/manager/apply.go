@@ -288,7 +288,7 @@ func (m *Manager) Apply(ctx context.Context, c Change, out io.Writer) Outcome {
 	// plugin stands.
 	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), afterTimeout)
 	defer cancel()
-	after, readErr := m.recordAfter(readCtx, c, ask, out)
+	after, followErr, readErr := m.recordAfter(readCtx, c, ask)
 	if readErr != nil {
 		o.AfterUnknown = true
 	} else if after != nil {
@@ -301,7 +301,7 @@ func (m *Manager) Apply(ctx context.Context, c Change, out io.Writer) Outcome {
 		// the state it was to be left in.
 		o.Err = errors.Join(installErr, m.restoreEnabled(readCtx, c.ID, &o, want))
 	} else {
-		o.Err = m.settle(readCtx, c, &o, want, readErr)
+		o.Err = errors.Join(m.settle(readCtx, c, &o, want, readErr), followErr)
 	}
 	return done()
 }
@@ -309,20 +309,21 @@ func (m *Manager) Apply(ctx context.Context, c Change, out io.Writer) Outcome {
 // recordAfter reads the plugin's record after an install. When herdr
 // recorded the commit it was asked for, the ref the target follows is kept,
 // or forgotten for a commit pin; the record returned is the plugin as
-// Installed lists it.
-func (m *Manager) recordAfter(ctx context.Context, c Change, asked string, out io.Writer) (*herdr.InstalledPluginInfo, error) {
+// Installed lists it. followErr says how the plugin is followed when that
+// is not what the target asked for, because the ref could not be kept or
+// forgotten.
+func (m *Manager) recordAfter(ctx context.Context, c Change, asked string) (after *herdr.InstalledPluginInfo, followErr, readErr error) {
 	plugins, err := m.installedRaw(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	var after *herdr.InstalledPluginInfo
 	for i := range plugins {
 		if plugins[i].PluginID == c.ID {
 			after = &plugins[i]
 		}
 	}
 	if after == nil {
-		return nil, nil //nolint:nilnil // No record: the plugin is not installed.
+		return nil, nil, nil
 	}
 	s := StateOf(*after)
 	if s.Source == c.Target.Source.String() && s.Ref == asked && s.Commit == c.Target.Commit && updates.IsCommit(asked) {
@@ -331,15 +332,26 @@ func (m *Manager) recordAfter(ctx context.Context, c Change, asked string, out i
 			f = &Follow{Source: s.Source, Ref: c.Target.Ref, Commit: asked}
 		}
 		if err := m.History.setFollow(c.ID, f); err != nil {
-			fmt.Fprintf(out, "warning: could not keep the ref %s follows, so it is listed as pinned: %v\n", c.ID, err)
+			followErr = followError(c.ID, c.Target.Ref, asked, err)
 		}
 	}
-	if follows, err := m.History.follows(); err == nil {
-		list := []herdr.InstalledPluginInfo{*after}
-		applyFollows(list, follows)
-		after = &list[0]
+	follows, err := m.History.follows()
+	if err != nil {
+		return after, errors.Join(followErr, fmt.Errorf("the refs this manager keeps could not be read, so %s is listed as herdr records it: %w", c.ID, err)), nil
 	}
-	return after, nil
+	list := []herdr.InstalledPluginInfo{*after}
+	applyFollows(list, follows)
+	return &list[0], followErr, nil
+}
+
+// followError says how a plugin installed at commit is followed when the
+// ref it is to follow could not be kept, or, for a pin, the ref it followed
+// before could not be forgotten.
+func followError(id, ref, commit string, err error) error {
+	if ref == commit {
+		return fmt.Errorf("herdr installed %s pinned to %.12s, but the ref it followed before could not be forgotten, so it is still listed as following that ref: %w", id, commit, err)
+	}
+	return fmt.Errorf("herdr installed %s at %.12s, but the ref it is to follow (%s) could not be kept, so it is listed as pinned to that commit and gets no updates: %w", id, commit, refName(ref), err)
 }
 
 // restoreEnabled leaves the plugin enabled or disabled as wanted when the
