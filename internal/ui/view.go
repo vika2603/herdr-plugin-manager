@@ -368,6 +368,8 @@ func (m *model) viewList() string {
 		// or drop it.
 		left = indent + t.accent.Render(f.Prompt) + t.text.Render(f.Value()) + t.faint.Render(m.keyHint(actSearch, "edits")+m.keyHint(actClose, "clears"))
 	}
+	// The count and order stay; a hint too long for the rest is cut short.
+	left = ansi.Truncate(left, max(m.w()-ansi.StringWidth(right)-1, 0), "…")
 	filter := spread(left, right, m.w())
 
 	var body []string

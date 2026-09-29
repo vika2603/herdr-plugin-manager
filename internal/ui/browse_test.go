@@ -291,3 +291,20 @@ func TestSortChangesTheOrderOnEveryPress(t *testing.T) {
 		t.Errorf("after clearing the search, sort shows %q, want popular then trending", got)
 	}
 }
+
+// A filter hint longer than the room left must not push out the count and
+// the order beside it.
+func TestFilterLineKeepsTheCountAndOrderOnANarrowScreen(t *testing.T) {
+	h := startMarket(t, 81, "macos")
+	if out := h.words(); !strings.Contains(out, "5 plugins · by popular") {
+		t.Errorf("the marketplace count and order are gone at 81 columns:\n%s", out)
+	}
+	h.press("s")
+	if out := h.words(); !strings.Contains(out, "by trending") {
+		t.Errorf("the order after s is not shown at 81 columns:\n%s", out)
+	}
+	h.press("1")
+	if out := h.words(); !strings.Contains(out, "… 2 plugins") {
+		t.Errorf("the installed count is gone at 81 columns:\n%s", out)
+	}
+}
