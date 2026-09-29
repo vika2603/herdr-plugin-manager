@@ -1,7 +1,5 @@
 #!/bin/sh
-# Downloads bin/hpm, the binary the plugin runs, from the release matching the
-# manifest's version, or builds it from source when that fails and Go is
-# installed.
+# Installs bin/hpm from the matching release, or builds it with Go.
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -14,8 +12,7 @@ aarch64) arch=arm64 ;;
 esac
 url=https://github.com/vika2603/herdr-plugin-manager/releases/download/v$version/hpm_${os}_${arch}.tar.gz
 
-# The new binary replaces bin/hpm by a rename, so an hpm that is running,
-# such as the one updating itself, keeps its own file.
+# Replace by rename so a running hpm keeps its file.
 tmp=bin/.new
 rm -rf "$tmp"
 mkdir -p "$tmp"
@@ -30,8 +27,7 @@ fi
 mv -f "$tmp/hpm" bin/hpm
 rm -rf "$tmp"
 
-# A copy goes in HPM_BIN_DIR, ~/.local/bin by default, so hpm runs from a
-# shell too. An hpm there that is not this program is left alone.
+# Copy to HPM_BIN_DIR (default ~/.local/bin), never over another hpm.
 dir=${HPM_BIN_DIR:-$HOME/.local/bin}
 target=$dir/hpm
 if [ -L "$target" ] || { [ -e "$target" ] && ! grep -q github.com/vika2603/herdr-plugin-manager "$target"; }; then
