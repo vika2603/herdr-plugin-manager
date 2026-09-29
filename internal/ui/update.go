@@ -443,6 +443,10 @@ func (m *model) keyDetail(k string) (tea.Model, tea.Cmd) {
 		m.showHelp = !m.showHelp
 		return m, nil
 	case actBack, actQuit:
+		if d.parent != nil && a == actBack {
+			m.detail = d.parent
+			return m, nil
+		}
 		m.screen, m.detail = screenList, nil
 		if d.review != nil {
 			m.screen = screenReview
@@ -476,7 +480,11 @@ func (m *model) keyDetail(k string) (tea.Model, tea.Cmd) {
 		case actToggle:
 			return m, m.toggle(p)
 		case actUpdate:
-			return m, m.openUpdate(p)
+			cmd := m.openUpdate(p)
+			if m.detail != d {
+				m.detail.parent = d
+			}
+			return m, cmd
 		case actUninstall:
 			m.askUninstall(p)
 			return m, nil
@@ -544,7 +552,7 @@ func changeKey(d *detail) (a action, verb string) {
 }
 
 // keyOutput scrolls the output; moving to its end follows what herdr still
-// prints. Any other key goes back, leaving a running operation running.
+// prints. Back leaves it, and a running operation running.
 func (m *model) keyOutput(a action) (tea.Model, tea.Cmd) {
 	switch a {
 	case actHelp:
@@ -566,12 +574,14 @@ func (m *model) keyOutput(a action) (tea.Model, tea.Cmd) {
 			m.page = nil
 			return m, p.retry()
 		}
-		fallthrough
-	default:
+		return m, nil
+	case actBack:
 		m.screen = screenList
 		if p := m.page; m.live == nil && p != nil && p.back == screenHistory && m.history != nil {
 			m.screen = screenHistory
 		}
+		return m, nil
+	default:
 		return m, nil
 	}
 	m.outputFollow = m.outputOffset >= m.outputMax

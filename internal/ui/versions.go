@@ -82,8 +82,9 @@ type (
 )
 
 const (
-	// minNotesWidth is the narrowest notes column worth drawing.
-	minNotesWidth = 30
+	// minNotesWidth is the narrowest notes column drawn beside the list;
+	// narrower, the notes take the list's place.
+	minNotesWidth = 50
 	// columnGap separates the version list from the notes.
 	columnGap = 3
 )
@@ -274,9 +275,11 @@ func (m *model) selectVersion(d *detail, i int) {
 // chooseVersion reloads an install preview at the chosen version; the
 // README follows the version, so it is read again when asked for. For an
 // installed plugin it opens the preview of the change.
+//
+// The preview opens as a detail of its own, with d as its parent: back
+// returns to d with the picker as it was left.
 func (m *model) chooseVersion(d *detail, r pickRow) tea.Cmd {
 	vp := d.versions
-	d.versions = nil
 	if d.plugin != nil {
 		kind := r.kind
 		switch {
@@ -286,14 +289,25 @@ func (m *model) chooseVersion(d *detail, r pickRow) tea.Cmd {
 		default:
 			kind = manager.KindSwitch
 		}
-		return m.openChange(*d.plugin, kind, r.ref)
+		cmd := m.openChange(*d.plugin, kind, r.ref)
+		if m.detail != d {
+			m.detail.parent = d
+		}
+		return cmd
 	}
 	if r.ref == shownRef(d) {
+		// The version already previewed: the same preview, from which back
+		// still returns to the picker.
+		child := *d
+		child.versions, child.parent = nil, d
+		m.detail = &child
 		return nil
 	}
-	d.preview, d.err, d.loading = nil, nil, true
-	d.readme, d.view, d.offsets = readme{}, viewInfo, [2]int{}
-	return m.withSpinner(m.loadPreview(d, d.install.src, r.ref, ""))
+	target := *d.install
+	target.ref, target.commit = r.ref, ""
+	child := &detail{crumb: d.crumb, title: d.title, loading: true, install: &target, entry: d.entry, parent: d}
+	m.detail = child
+	return m.withSpinner(m.loadPreview(child, target.src, r.ref, ""))
 }
 
 // openChange opens the preview of a version change of p: the manifest at
@@ -332,16 +346,23 @@ func (m *model) versionLines(d *detail) []string {
 	notesWidth := m.w() - vp.listWidth - 2
 	if notesWidth < minNotesWidth {
 		vp.listWidth = m.w()
+		k := m.keys.name(actSwitch)
 		if vp.notesOnly {
-			notes := m.notesColumn(d, m.w()-len(indent)-1)
-			for i := range notes {
-				notes[i] = indent + notes[i]
+			var out []string
+			if k != "" {
+				out = append(out, indent+m.theme.faint.Render(k+" shows the versions"), "")
 			}
-			return notes
+			for _, l := range m.notesColumn(d, m.w()-len(indent)-1, m.listRows()-len(out)) {
+				out = append(out, indent+l)
+			}
+			return out
+		}
+		if k != "" {
+			left = append(left, "", indent+m.theme.faint.Render(k+" shows the release notes"))
 		}
 		return left
 	}
-	right := m.notesColumn(d, notesWidth)
+	right := m.notesColumn(d, notesWidth, m.listRows())
 	sep := m.theme.rule.Render("│") + " "
 	out := make([]string, m.bodyHeight())
 	for i := range out {
@@ -399,7 +420,9 @@ func (m *model) versionList(d *detail) []string {
 
 // notesColumn is the heading and release notes of the selected version, or
 // what the selected change does.
-func (m *model) notesColumn(d *detail, width int) []string {
+// notesColumn draws the notes of the selected version width cells wide,
+// the notes themselves scrolled within rows lines below their heading.
+func (m *model) notesColumn(d *detail, width, rows int) []string {
 	t := m.theme
 	vp := d.versions
 	r := vp.rows[vp.cursor]
@@ -449,6 +472,6 @@ func (m *model) notesColumn(d *detail, width int) []string {
 		lines = append(m.render(rel.Notes, width), "", indent+t.faint.Render(safe.Line(rel.URL)))
 		vp.rendered[ref] = lines
 	}
-	vp.notesOffset = min(vp.notesOffset, max(len(lines)-m.listRows(), 0))
+	vp.notesOffset = min(vp.notesOffset, max(len(lines)-rows, 0))
 	return append([]string{heading, ""}, lines[vp.notesOffset:]...)
 }

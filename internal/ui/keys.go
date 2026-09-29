@@ -16,7 +16,7 @@ type helpKeys struct {
 	details, toggle, update, all, check, remove, reload, logs, refresh, sort, install,
 	apply, browse, instTab, open, keep, clear, move, yes, no, cont, home, info, readme,
 	version, choose, cancel, notes, step, preview, rollback, applyReview, include, reviewed, leave,
-	stop, running, retry, history, entry, doctor, recheck, notesTab key.Binding
+	stop, running, retry, history, entry, doctor, recheck, notesTab, listTab key.Binding
 }
 
 func newHelpKeys(km keymap) helpKeys {
@@ -67,17 +67,17 @@ func newHelpKeys(km keymap) helpKeys {
 		refresh: first(actReload, "refresh index"), sort: first(actSort, "sort"), install: first(actInstall, "install"),
 		apply: first(actUpdate, "update"), browse: first(actSwitch, "marketplace"), instTab: first(actSwitch, "installed"),
 		open: first(actOpen, "open"), keep: first(actSwitch, "keep"), clear: first(actClose, "clear"), move: move,
-		yes: first(actConfirm, "confirm"), no: fixed("any other key", "cancel"), cont: fixed("any key", "back"),
+		yes: first(actConfirm, "confirm"), no: fixed("any other key", "cancel"), cont: first(actBack, "back"),
 		home: first(actHomepage, "homepage"), info: first(actSwitch, "info"), readme: first(actSwitch, "readme"),
-		version: first(actVersion, "version"), choose: first(actOpen, "choose"), cancel: first(actBack, "cancel"),
+		version: first(actVersion, "version"), choose: first(actOpen, "choose"), cancel: first(actBack, "back"),
 		notes: pair(actPageUp, actPageDown, "scroll notes"), step: pair(actUp, actDown, "move"),
 		rollback:    first(actRollback, "roll back"),
 		applyReview: first(actUpdate, "update included"), include: first(actToggle, "include/leave out"),
 		reviewed: first(actOpen, "details"), leave: first(actClose, "back"),
-		stop: fixed("ctrl+c", "cancel"), running: fixed("any key", "back, it keeps running"),
+		stop: fixed("ctrl+c", "cancel"), running: first(actBack, "back, it keeps running"),
 		retry: first(actRetry, "retry"), history: first(actHistory, "history"), entry: first(actOpen, "output"),
 		doctor: first(actDoctor, "diagnostics"), recheck: first(actReload, "check again"),
-		notesTab: first(actSwitch, "notes"),
+		notesTab: first(actSwitch, "notes"), listTab: first(actSwitch, "versions"),
 	}
 }
 
@@ -97,6 +97,9 @@ func (k keyMap) FullHelp() [][]key.Binding {
 	return k.full
 }
 
+// helpColumnWidth is the width a column of the full help is given.
+const helpColumnWidth = 22
+
 // keyMap is the help for the current screen. Every screen's bar ends with
 // the help key, which lists all of the screen's keys when some do not fit.
 func (m *model) keyMap() keyMap {
@@ -104,11 +107,13 @@ func (m *model) keyMap() keyMap {
 	if m.confirm != nil || m.screen == screenList {
 		return k
 	}
+	// As many columns as fit, about helpColumnWidth cells each.
+	all := append(slices.Clone(k.short), m.helpKeys.less)
+	columns := max((m.w()-2)/helpColumnWidth, 1)
 	var full [][]key.Binding
-	for chunk := range slices.Chunk(k.short, 4) {
-		full = append(full, slices.Clone(chunk))
+	for chunk := range slices.Chunk(all, (len(all)+columns-1)/columns) {
+		full = append(full, chunk)
 	}
-	full = append(full, []key.Binding{m.helpKeys.less})
 	return keyMap{short: append(slices.Clone(k.short), m.moreKey()), full: full}
 }
 
@@ -122,25 +127,28 @@ func (m *model) screenKeys() keyMap {
 	case screenOutput:
 		switch {
 		case m.live != nil:
-			return keyMap{short: []key.Binding{h.stop, h.scroll, h.running}}
+			return keyMap{short: []key.Binding{h.stop, h.running, h.scroll}}
 		case m.page != nil && m.page.retry != nil:
-			return keyMap{short: []key.Binding{h.retry, h.scroll, h.cont}}
+			return keyMap{short: []key.Binding{h.retry, h.cont, h.scroll}}
 		}
 		return keyMap{short: []key.Binding{h.cont, h.scroll}}
 	case screenHistory:
-		return keyMap{short: []key.Binding{h.entry, h.up, h.down, h.reload, h.leave}}
+		return keyMap{short: []key.Binding{h.entry, h.leave, h.up, h.down, h.reload}}
 	case screenDoctor:
-		return keyMap{short: []key.Binding{h.recheck, h.scroll, h.leave}}
+		return keyMap{short: []key.Binding{h.recheck, h.leave, h.scroll}}
 	case screenReview:
-		return keyMap{short: []key.Binding{h.applyReview, h.include, h.reviewed, h.up, h.down, h.leave}}
+		return keyMap{short: []key.Binding{h.applyReview, h.leave, h.include, h.reviewed, h.up, h.down}}
 	case screenDetail:
 		d := m.detail
 		if d.versions != nil {
-			if d.versions.listWidth == m.w() {
+			switch vp := d.versions; {
+			case vp.showingNotesOnly(m.w()):
+				return keyMap{short: []key.Binding{h.choose, h.cancel, h.listTab, h.step, h.notes}}
+			case vp.listWidth == m.w():
 				// Too narrow for the notes beside the list.
-				return keyMap{short: []key.Binding{h.choose, h.notesTab, h.step, h.notes, h.cancel}}
+				return keyMap{short: []key.Binding{h.choose, h.cancel, h.notesTab, h.step}}
 			}
-			return keyMap{short: []key.Binding{h.choose, h.step, h.notes, h.cancel}}
+			return keyMap{short: []key.Binding{h.choose, h.cancel, h.step, h.notes}}
 		}
 		other := h.info
 		switch {
@@ -152,15 +160,15 @@ func (m *model) screenKeys() keyMap {
 		switch {
 		case d.plugin != nil:
 			if ch, ok := m.checks[d.plugin.PluginID]; ok && ch.Err == nil && ch.Result.Kind == updates.Available {
-				return keyMap{short: []key.Binding{h.update, other, h.toggle, h.version, h.remove, h.rollback, h.home, h.scroll, h.back}}
+				return keyMap{short: []key.Binding{h.update, h.back, other, h.toggle, h.version, h.remove, h.rollback, h.home, h.scroll}}
 			}
-			return keyMap{short: []key.Binding{other, h.toggle, h.update, h.version, h.remove, h.rollback, h.home, h.logs, h.scroll, h.back}}
+			return keyMap{short: []key.Binding{other, h.back, h.toggle, h.update, h.version, h.remove, h.rollback, h.home, h.logs, h.scroll}}
 		case d.change != nil && d.review != nil:
 			return keyMap{short: []key.Binding{h.back, other, h.home, h.scroll}}
 		case d.change != nil:
-			return keyMap{short: []key.Binding{m.applyKey(d), other, h.home, h.scroll, h.back}}
+			return keyMap{short: []key.Binding{m.applyKey(d), h.back, other, h.home, h.scroll}}
 		default:
-			return keyMap{short: []key.Binding{h.install, other, h.version, h.home, h.scroll, h.back}}
+			return keyMap{short: []key.Binding{h.install, h.back, other, h.version, h.home, h.scroll}}
 		}
 	}
 	if m.filters[m.tab].Focused() {

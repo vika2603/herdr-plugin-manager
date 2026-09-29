@@ -228,8 +228,10 @@ type detail struct {
 	entry *market.Entry
 	// versions is open while the user picks another version to preview.
 	versions *versionPicker
-	// review is the batch review the detail was opened from.
+	// review is the batch review the detail was opened from, and parent
+	// the detail whose version picker opened it, which back returns to.
 	review *batchReview
+	parent *detail
 	// explain describes a change's preview once it is read, and notes are
 	// its release notes rendered at notesWidth.
 	explain    *manager.Explanation
@@ -576,6 +578,10 @@ func (m *model) onRollback(msg rollbackMsg) tea.Cmd {
 	u := msg.undo
 	c := &pendingChange{kind: manager.KindRollback, plugin: p, target: u.Target, note: u.Describe(), undo: &u}
 	d := &detail{crumb: tabNames[tabInstalled], title: "Roll back " + p.Name, loading: true, change: c}
+	// Asked for from the plugin's details, back returns to them.
+	if from := m.detail; m.screen == screenDetail && from != nil && from.plugin != nil && from.plugin.PluginID == p.PluginID {
+		d.parent = from
+	}
 	m.detail, m.screen = d, screenDetail
 	return m.withSpinner(m.loadPreview(d, u.Target.Source, u.Target.Commit, ""))
 }

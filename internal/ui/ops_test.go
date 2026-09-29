@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -392,16 +393,25 @@ func TestNarrowScreenReachesNotesAndEveryKey(t *testing.T) {
 	b := newFake()
 	b.preview.Ref, b.preview.DefaultBranch = "v1.1.0", "main"
 	b.preview.Releases = []string{"v1.1.0", "v1.0.0"}
-	b.releases = []market.Release{{Tag: "v1.1.0", Name: "Faster gadgets", Notes: "Gadgets start twice as fast."}}
+	var notes strings.Builder
+	notes.WriteString("Gadgets start twice as fast.\n")
+	for i := range 40 {
+		fmt.Fprintf(&notes, "\n- point %d", i+1)
+	}
+	b.releases = []market.Release{{Tag: "v1.1.0", Name: "Faster gadgets", Notes: notes.String(), URL: "https://example/v1.1.0"}}
 	h := start(t, b)
 	h.m.Update(tea.WindowSizeMsg{Width: 44, Height: 30})
 	h.press("tab", "enter", "v")
-	if out := h.words(); strings.Contains(out, "twice as fast") || !strings.Contains(out, "tab notes") {
+	if out := h.words(); strings.Contains(out, "twice as fast") || !strings.Contains(out, "tab shows the release notes") {
 		t.Fatalf("a narrow picker should show the list and how to reach the notes:\n%s", out)
 	}
 	h.press("tab")
-	if out := h.words(); !strings.Contains(out, "Faster gadgets") || !strings.Contains(out, "twice as fast") {
-		t.Errorf("tab did not show the notes of v1.1.0:\n%s", out)
+	if out := h.words(); !strings.Contains(out, "Faster gadgets") || !strings.Contains(out, "twice as fast") || !strings.Contains(out, "tab shows the versions") {
+		t.Errorf("tab did not show the notes of v1.1.0, and how to return to the versions:\n%s", out)
+	}
+	h.press("ctrl+d", "ctrl+d", "ctrl+d")
+	if out := h.words(); !strings.Contains(out, "point 40") || !strings.Contains(out, "https://example/v1.1.0") {
+		t.Errorf("the notes do not scroll to their end:\n%s", out)
 	}
 	h.press("esc", "?")
 	out := h.words()
@@ -409,5 +419,52 @@ func TestNarrowScreenReachesNotesAndEveryKey(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("? does not list %q on a narrow preview:\n%s", want, out)
 		}
+	}
+}
+
+// Back retraces the way in: a preview opened from the version picker
+// returns to the picker as it was left, a preview opened from a plugin's
+// details returns to them, and the list keeps its search, order and
+// selection.
+func TestBackRetracesTheWayIn(t *testing.T) {
+	b := newFake()
+	b.preview.Ref, b.preview.DefaultBranch = "v1.1.0", "main"
+	b.preview.Releases = []string{"v1.1.0", "v1.0.0"}
+	h := start(t, b)
+	h.press("tab", "/", "g", "a", "d", "tab", "s")
+	h.press("enter", "v", "down", "enter")
+	if d := h.m.detail; d == nil || d.versions != nil || d.install.ref != "v1.0.0" {
+		t.Fatalf("choosing v1.0.0 did not preview it:\n%s", h.screen())
+	}
+	h.press("esc")
+	if vp := h.m.detail.versions; vp == nil || vp.rows[vp.cursor].ref != "v1.0.0" {
+		t.Fatalf("back from the preview did not return to the picker at v1.0.0:\n%s", h.screen())
+	}
+	h.press("up", "enter", "esc")
+	if vp := h.m.detail.versions; vp == nil || vp.rows[vp.cursor].ref != "v1.1.0" {
+		t.Fatalf("back from the version already shown did not return to the picker:\n%s", h.screen())
+	}
+	h.press("esc", "esc")
+	if h.m.screen != screenList || h.m.filters[tabBrowse].Value() != "gad" || h.m.order != market.ByPopular {
+		t.Errorf("back at the list, search %q and order %v are not kept", h.m.filters[tabBrowse].Value(), h.m.order)
+	}
+
+	h.press("1", "enter", "u", "esc")
+	if h.m.screen != screenDetail || h.m.detail.plugin == nil {
+		t.Errorf("back from an update opened in the details did not return to them:\n%s", h.screen())
+	}
+	h.press("esc", "u", "esc")
+	if h.m.screen != screenList {
+		t.Errorf("back from an update opened in the list did not return to it:\n%s", h.screen())
+	}
+
+	b.installErr = errors.New("build failed")
+	h.press("u", "u", "x")
+	if h.m.screen != screenOutput {
+		t.Fatalf("a key other than back left the output")
+	}
+	h.press("esc")
+	if h.m.screen != screenList {
+		t.Errorf("back did not leave the output")
 	}
 }

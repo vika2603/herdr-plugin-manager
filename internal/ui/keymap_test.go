@@ -68,7 +68,7 @@ func TestConfiguredKeysDriveTheUI(t *testing.T) {
 		}
 	}
 	h.press("enter")
-	if words := strings.Join(strings.Fields(h.screen()), " "); !strings.Contains(words, "Press I to install") || !strings.Contains(words, "I install ] readme") {
+	if words := strings.Join(strings.Fields(h.screen()), " "); !strings.Contains(words, "Press I to install") || !strings.Contains(words, "I install esc back ] readme") {
 		t.Errorf("hints should name the configured key:\n%s", h.screen())
 	}
 	h.press("I")
