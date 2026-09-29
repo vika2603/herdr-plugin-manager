@@ -61,8 +61,8 @@ func (c *cli) root(tui TUI) *cobra.Command {
 		Use:   app.Name,
 		Short: "Browse, install and update herdr plugins",
 		Long: "Browse, install and update herdr plugins.\n\n" +
-			"Without a command, opens the interactive manager in this terminal.\n" +
-			"Installed as a herdr plugin, the same manager opens in a popup.",
+			"Without a command, hpm opens the interactive manager in this terminal.\n" +
+			"Installed as a herdr plugin, it also opens in a popup.",
 		Version:       app.Version,
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
@@ -90,12 +90,15 @@ func (c *cli) listCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "list [filter...]",
-		Short: "List installed and linked plugins",
-		Long: "List installed and linked plugins; with a filter, those whose id, name,\n" +
-			"description or source has every word, and that are in every state named as\n" +
-			"is:<state>, or not in it as -is:<state>. The states are " + strings.Join(manager.InstalledStates, ", ") + ";\n" +
-			"update, current and failed are what an update check finds, and run one.\n" +
-			"The popup's filter takes the same.",
+		Short: "List installed plugins",
+		Long: "List installed and linked plugins. Words match the id, name, description or\n" +
+			"source; is:<state> keeps plugins in a state and -is:<state> drops them. Put --\n" +
+			"before a -is: term so it is not read as a flag.\n\n" +
+			"States: " + strings.Join(manager.InstalledStates, ", ") + ".\n" +
+			"update, current and failed run an update check. The popup's filter takes the same.",
+		Example: "  hpm list is:disabled\n" +
+			"  hpm list theme is:update\n" +
+			"  hpm list -- -is:local",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			f, text, err := manager.ParseFilter(strings.Join(args, " "), manager.InstalledStates)
@@ -202,14 +205,15 @@ func (c *cli) searchCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "search [query...]",
-		Short: "Search the herdr plugin marketplace",
-		Long: "Search the herdr plugin marketplace index published at " + market.IndexURL + ".\n" +
-			"Every query term must appear in the plugin's id, name, description, source,\n" +
-			"language or topics. Results are ranked by where the terms appear: the name\n" +
-			"and id first, then descriptions, then topics; topics that matched are shown\n" +
-			"in brackets. is:installed, is:compatible and is:incompatible, or -is:<state>,\n" +
-			"keep the listings in or out of that state. The index is unreviewed: a\n" +
-			"listing is not an endorsement.",
+		Short: "Search the plugin marketplace",
+		Long: "Search the herdr plugin marketplace at " + market.IndexURL + ".\n" +
+			"Every word must match the id, name, description, source, language or topics.\n" +
+			"is:installed, is:compatible and is:incompatible keep listings in that state;\n" +
+			"-is:<state> drops them, after --. Listings are not reviewed.",
+		Example: "  hpm search git\n" +
+			"  hpm search theme is:compatible\n" +
+			"  hpm search --sort trending\n" +
+			"  hpm search -- theme -is:installed",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			order, ok := market.ParseOrder(sortBy)
 			if !ok {
@@ -278,9 +282,11 @@ func (c *cli) infoCmd() *cobra.Command {
 	var ref string
 	cmd := &cobra.Command{
 		Use:   "info <plugin-id | owner/repo[/subdir]>",
-		Short: "Show an installed plugin, or preview one from GitHub",
-		Long: "Show an installed plugin by id. Otherwise read the manifest of a marketplace\n" +
-			"plugin or a GitHub source and show what installing it would run.",
+		Short: "Show a plugin, installed or from GitHub",
+		Long: "Show an installed plugin by id, or preview a marketplace plugin or GitHub\n" +
+			"source: its manifest and the commands installing it would run.",
+		Example: "  hpm info owner/repo\n" +
+			"  hpm info owner/repo --ref v1.2.0",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -303,7 +309,7 @@ func (c *cli) infoCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&ref, "ref", "", "branch, tag or commit to preview (default: what install would pick)")
+	cmd.Flags().StringVar(&ref, "ref", "", "branch, tag or commit to preview (default: what install picks)")
 	return cmd
 }
 
@@ -339,12 +345,12 @@ func (c *cli) installCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "install <plugin-id | owner/repo[/subdir]>",
-		Short: "Preview and install a plugin from GitHub",
-		Long: "Install a marketplace plugin by id, or any GitHub plugin by its\n" +
-			"owner/repo[/subdir] source. The manifest is shown first: its build commands\n" +
-			"run during install and its startup commands in every herdr session. Once\n" +
-			"installed, its config directory and actions are listed, with a key binding\n" +
-			"for herdr's config.",
+		Short: "Install a plugin from the marketplace or GitHub",
+		Long: "Install a marketplace plugin by id, or a GitHub plugin by owner/repo[/subdir].\n" +
+			"The manifest is shown for confirmation first: its build commands run during\n" +
+			"install, and its startup commands in every herdr session.",
+		Example: "  hpm install owner/repo\n" +
+			"  hpm install owner/repo/plugins/name --ref main",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -381,8 +387,8 @@ func (c *cli) installCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&ref, "ref", "", "branch, tag or commit to install (default: the latest release of a plugin at the repository root, else the default branch)")
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "install without asking")
+	cmd.Flags().StringVar(&ref, "ref", "", "branch, tag or commit to install (default: the latest release for a plugin at the repository root, otherwise the default branch)")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation")
 	return cmd
 }
 
@@ -390,9 +396,9 @@ func (c *cli) uninstallCmd() *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
 		Use:   "uninstall <plugin-id>",
-		Short: "Uninstall a GitHub plugin or unlink a local one",
-		Long: "Uninstall a plugin. A GitHub install loses its managed checkout; a locally\n" +
-			"linked plugin is only unregistered and its directory is left alone.",
+		Short: "Uninstall or unlink a plugin",
+		Long: "Uninstall a GitHub plugin and remove its checkout, or unlink a local plugin\n" +
+			"and keep its directory.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := c.confirm(yes, "Uninstall "+args[0]+"?"); err != nil {
@@ -401,14 +407,14 @@ func (c *cli) uninstallCmd() *cobra.Command {
 			return c.m.Uninstall(cmd.Context(), args[0], c.out)
 		},
 	}
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "uninstall without asking")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation")
 	return cmd
 }
 
 func (c *cli) enableCmd(enable bool) *cobra.Command {
-	use, short := "disable", "Disable a plugin (needs a running herdr server)"
+	use, short := "disable", "Disable plugins (needs a running herdr server)"
 	if enable {
-		use, short = "enable", "Enable a plugin (needs a running herdr server)"
+		use, short = "enable", "Enable plugins (needs a running herdr server)"
 	}
 	return &cobra.Command{
 		Use:   use + " <plugin-id>...",
@@ -445,12 +451,10 @@ func (c *cli) outdatedCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "outdated",
-		Short: "Check installed GitHub plugins for updates",
-		Long: "Compare each GitHub-installed plugin with its remote. A plugin installed from a\n" +
-			"release tag is compared with the newest release tag; one installed from a branch\n" +
-			"or the default branch with that branch's current commit; for a plugin in a\n" +
-			"subdirectory, only commits that change the subdirectory count. Commit pins are skipped.\n" +
-			"Exits with an error when any check fails.",
+		Short: "Check plugins for updates",
+		Long: "Check each GitHub plugin for updates: one installed from a release against\n" +
+			"newer releases, one following a branch against its latest commit. Pinned\n" +
+			"plugins are skipped. Exits with an error if a check fails.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
@@ -516,17 +520,15 @@ func (c *cli) updateCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "update [plugin-id...]",
-		Short: "Update GitHub plugins by reinstalling them",
-		Long: "Update the given plugins, or every plugin with an update. herdr has no update\n" +
-			"command, so each plugin is reinstalled at its new target. The updates are\n" +
-			"listed first, then each is shown in full: what changes, its release notes or\n" +
-			"commits, and the new manifest, whose build commands run again. herdr is asked\n" +
-			"for the commit shown, so what builds is what was shown, whatever the ref\n" +
-			"points at by then.\n\n" +
-			"A disabled plugin stays disabled, which needs a running herdr server; without\n" +
-			"one it is not updated. Each update reports the plugin's state after it.\n" +
-			"Plugins whose check succeeded are still updated when others fail; the command\n" +
-			"then exits with an error.",
+		Short: "Update plugins",
+		Long: "Update the named plugins, or every plugin with an update. Each update is\n" +
+			"shown in full first: what changes, its release notes or commits, and the new\n" +
+			"manifest. The commit shown is the one installed.\n\n" +
+			"A disabled plugin stays disabled, which needs a running herdr server. When\n" +
+			"some updates fail, the rest still run and the command exits with an error.",
+		Example: "  hpm update --dry-run\n" +
+			"  hpm update example.theme\n" +
+			"  hpm update --exclude example.theme,example.tool",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			plugins, err := c.m.Installed(ctx)
@@ -574,9 +576,9 @@ func (c *cli) updateCmd() *cobra.Command {
 			return errors.Join(checkErr, blockErr, failErr)
 		},
 	}
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "update without asking")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show the updates in full without applying them")
-	cmd.Flags().StringSliceVar(&exclude, "exclude", nil, "leave this plugin out; repeat or separate with commas")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change, without changing anything")
+	cmd.Flags().StringSliceVar(&exclude, "exclude", nil, "skip this plugin; repeat or separate with commas")
 	return cmd
 }
 
@@ -710,33 +712,39 @@ func (c *cli) report(o manager.Outcome) error {
 // versionCmds describe the commands that move an installed plugin to
 // another version or change how it follows new ones.
 var versionCmds = map[manager.ChangeKind]struct {
-	use, short, long string
-	args             cobra.PositionalArgs
+	use, short, long, example string
+	args                      cobra.PositionalArgs
 }{
 	manager.KindSwitch: {
-		"switch <plugin-id> <ref>", "Install another version of a plugin: a release, a branch or a commit",
+		"switch <plugin-id> <ref>", "Install another version of a plugin",
 		"Reinstall a plugin at ref, which it then follows: a release tag follows newer\n" +
-			"releases, a branch or another tag follows it when it moves, and a commit is a\n" +
-			"pin with no updates. An older release downgrades the plugin.",
+			"releases, a branch or other tag follows it as it moves, and a commit pins the\n" +
+			"plugin. An older release downgrades it.",
+		"  hpm switch example.theme v1.2.0\n" +
+			"  hpm switch example.theme main",
 		cobra.ExactArgs(2),
 	},
 	manager.KindPin: {
-		"pin <plugin-id>", "Hold a plugin at the commit it is installed at",
-		"Reinstall a plugin at the commit it is installed at, recorded as a pin, so that\n" +
-			"it has no updates until it is unpinned.",
+		"pin <plugin-id>", "Hold a plugin at its installed commit",
+		"Pin a plugin at the commit it is installed at, so it gets no updates until\n" +
+			"it is unpinned. The plugin is reinstalled at that commit.",
+		"",
 		cobra.ExactArgs(1),
 	},
 	manager.KindUnpin: {
-		"unpin <plugin-id> [ref]", "Let a pinned plugin follow a release, branch or tag again",
-		"Reinstall a pinned plugin at ref, which it then follows. Without ref it follows\n" +
-			"what an install picks: the latest release of a plugin at the repository root,\n" +
-			"else the default branch. The version installed is where that ref is now.",
+		"unpin <plugin-id> [ref]", "Let a pinned plugin follow updates again",
+		"Reinstall a pinned plugin at ref, which it then follows. Without ref, it\n" +
+			"follows what install picks: the latest release for a plugin at the repository\n" +
+			"root, otherwise the default branch.",
+		"  hpm unpin example.theme\n" +
+			"  hpm unpin example.theme main",
 		cobra.RangeArgs(1, 2),
 	},
 	manager.KindReinstall: {
-		"reinstall <plugin-id>", "Reinstall a plugin at the version it is installed at",
+		"reinstall <plugin-id>", "Rebuild a plugin at its installed commit",
 		"Reinstall a plugin at the commit it is installed at, running its build\n" +
-			"commands again. It keeps following what it follows.",
+			"commands again. What it follows does not change.",
+		"",
 		cobra.ExactArgs(1),
 	},
 }
@@ -748,7 +756,7 @@ func (c *cli) versionCmd(kind manager.ChangeKind) *cobra.Command {
 	d := versionCmds[kind]
 	var yes bool
 	cmd := &cobra.Command{
-		Use: d.use, Short: d.short, Long: d.long, Args: d.args,
+		Use: d.use, Short: d.short, Long: d.long, Example: d.example, Args: d.args,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			id := args[0]
@@ -793,7 +801,7 @@ func (c *cli) versionCmd(kind manager.ChangeKind) *cobra.Command {
 			}, c.out))
 		},
 	}
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "go ahead without asking")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation")
 	return cmd
 }
 
@@ -808,13 +816,11 @@ func (c *cli) rollbackCmd() *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
 		Use:   "rollback <plugin-id>",
-		Short: "Undo the last change this manager made to a plugin",
-		Long: "Take a plugin back to where it was before the last install, update or other\n" +
-			"change recorded in the history, enabled or disabled as it was. An install is\n" +
-			"undone by uninstalling, and a change that only enabled or disabled the plugin\n" +
-			"by changing that back. Otherwise the earlier commit is reinstalled, so its\n" +
-			"manifest is shown first, and the plugin follows the ref it followed then. A\n" +
-			"plugin changed outside this manager is left alone.",
+		Short: "Undo the last change hpm made to a plugin",
+		Long: "Return a plugin to where it was before the last change in the history,\n" +
+			"enabled or disabled as it was. An install is undone by uninstalling, and an\n" +
+			"enable or disable by reversing it; other changes reinstall the earlier\n" +
+			"commit, shown first. A plugin changed outside hpm is left alone.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -854,7 +860,7 @@ func (c *cli) rollbackCmd() *cobra.Command {
 			return c.report(c.m.Rollback(ctx, u, c.out))
 		},
 	}
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "roll back without asking")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation")
 	return cmd
 }
 
@@ -866,11 +872,12 @@ func (c *cli) historyCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "history [plugin-id]",
-		Short: "List the changes this manager made to plugins",
-		Long: "List the installs, updates, rollbacks and uninstalls this manager made, the\n" +
-			"newest first, with each plugin's state before and after. --show prints one\n" +
-			"change in full, with everything herdr printed during it. The history is kept\n" +
-			"in $XDG_STATE_HOME/" + "herdr-plugin-manager, or ~/.local/state/herdr-plugin-manager.",
+		Short: "List the changes hpm made",
+		Long: "List the changes hpm made, newest first, with each plugin's state before and\n" +
+			"after. The history is kept in $XDG_STATE_HOME/herdr-plugin-manager, by default\n" +
+			"~/.local/state/herdr-plugin-manager.",
+		Example: "  hpm history example.theme\n" +
+			"  hpm history --show ID",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			entries, err := c.m.HistoryEntries()
@@ -937,7 +944,7 @@ func (c *cli) logsCmd() *cobra.Command {
 	var limit int
 	cmd := &cobra.Command{
 		Use:   "logs <plugin-id>",
-		Short: "Show the commands herdr ran for a plugin (needs a running herdr server)",
+		Short: "Show herdr's command logs for a plugin (needs a running herdr server)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			logs, err := c.m.Logs(cmd.Context(), args[0], limit)
@@ -969,9 +976,9 @@ func (c *cli) logsCmd() *cobra.Command {
 func (c *cli) keysCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "keys",
-		Short: "List the keys of the interactive manager, and the config file",
-		Long: "List what each key does in the popup and in the terminal manager. To change\n" +
-			"them, give an action its keys in the [keys] table of the config file, such as\n" +
+		Short: "List the interactive manager's keys",
+		Long: "List the keys of the popup and the terminal manager. To rebind one, give its\n" +
+			"action keys in the [keys] table of the config file, such as\n" +
 			"  install = [\"I\"]\n" +
 			"An empty list unbinds the action.",
 		Args: cobra.NoArgs,
@@ -1160,12 +1167,10 @@ func (c *cli) doctorCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "doctor",
-		Short: "Check herdr, its server and config, git, GitHub and the installed plugins",
-		Long: "Check what the manager depends on: the herdr command and server, herdr's\n" +
-			"config and the keys it binds to plugin actions, git, GitHub's API, the\n" +
-			"marketplace index, the history and this manager's config; then each\n" +
-			"installed plugin that cannot run here or that herdr warns about. It changes\n" +
-			"nothing, and exits with an error when something fails.",
+		Short: "Check hpm's setup and the installed plugins",
+		Long: "Check herdr and its server, herdr's config and key bindings, git, GitHub, the\n" +
+			"marketplace index, the history, hpm's config and the installed plugins.\n" +
+			"Changes nothing; exits with an error if a check fails.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()

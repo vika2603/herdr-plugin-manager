@@ -20,11 +20,11 @@ func (c *cli) exportCmd() *cobra.Command {
 	var output string
 	cmd := &cobra.Command{
 		Use:   "export",
-		Short: "Write the installed plugins to a file hpm import reads",
-		Long: "Write every installed and linked plugin as JSON: its source, the ref it\n" +
-			"follows, the commit installed and whether it is enabled. hpm import reads\n" +
-			"the file on another machine. A locally linked plugin is listed with its\n" +
-			"directory, which import cannot bring back.",
+		Short: "Save the installed plugins to a file for import",
+		Long: "Write the installed plugins as JSON: source, followed ref, installed commit\n" +
+			"and enabled state. Local links are listed but cannot be imported.",
+		Example: "  hpm export -o plugins.json\n" +
+			"  hpm import plugins.json",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			exp, err := c.m.Export(cmd.Context())
@@ -98,25 +98,20 @@ func (c *cli) restoreCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "import <file> [plugin-id...]",
-		Short: "Install the plugins of an export as they were exported",
-		Long: "Bring this machine's plugins to what hpm export wrote, for the plugins named\n" +
-			"or all of them. Each plugin is installed from its source at the exported\n" +
-			"commit, follows the exported ref afterwards, and is enabled or disabled as\n" +
-			"exported. Plugins installed here and not in the export are left alone.\n\n" +
-			"The plan comes first: what each plugin needs, and which cannot be imported\n" +
-			"and why, such as a local link, a source hpm cannot install, the same id\n" +
-			"installed here from another source, or a manifest that cannot run here. Then\n" +
-			"each install is shown in full, and nothing runs until the plan is confirmed.\n" +
-			"No plugin is installed from another source or at another commit in place of\n" +
-			"what was exported.\n\n" +
-			"Just before each plugin is changed, its record is read again; a plugin that\n" +
-			"changed after the plan was made, such as one installed from another source\n" +
-			"meanwhile, is left as it is, and import must be run again to review it.\n\n" +
-			"Keeping a plugin disabled, and enabling or disabling one, needs a running\n" +
-			"herdr server. Each change, including one that only enables or disables a\n" +
-			"plugin, is recorded in the history as an import, which hpm rollback undoes.\n" +
-			"The command exits with an error when any plugin asked for is not as\n" +
+		Short: "Install plugins from an export file",
+		Long: "Install the plugins of an export, or those named: each at its exported commit,\n" +
+			"then following the exported ref, enabled or disabled as exported. Plugins not\n" +
+			"in the export are left alone.\n\n" +
+			"A plan comes first, with what each plugin needs and which cannot be imported\n" +
+			"and why; each install is shown in full, and nothing runs until the plan is\n" +
+			"confirmed. A plugin that changes after the plan is left as it is; run import\n" +
+			"again to review it.\n\n" +
+			"Enabling, disabling or keeping a plugin disabled needs a running herdr server.\n" +
+			"hpm rollback undoes each change. Exits with an error if any plugin is not as\n" +
 			"exported afterwards.",
+		Example: "  hpm import plugins.json --dry-run\n" +
+			"  hpm import plugins.json example.theme\n" +
+			"  hpm import plugins.json --exclude example.theme",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -156,9 +151,9 @@ func (c *cli) restoreCmd() *cobra.Command {
 			return restoreError(plan.Items, results)
 		},
 	}
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "import without asking")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show the plan in full without changing anything")
-	cmd.Flags().StringSliceVar(&exclude, "exclude", nil, "leave this plugin out; repeat or separate with commas")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would change, without changing anything")
+	cmd.Flags().StringSliceVar(&exclude, "exclude", nil, "skip this plugin; repeat or separate with commas")
 	return cmd
 }
 
