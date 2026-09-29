@@ -77,6 +77,8 @@ accent = "teal"    # indigo、teal、magenta 或 "#RRGGBB"
 | `hpm reinstall <id>` | 重装当前版本 |
 | `hpm logs <id>` | herdr 最近为插件运行的命令 |
 
+插件市场列表展示每个插件的用途、star 数、仓库的主要语言和最近推送时间，以及是否已安装、能否在当前环境运行。窗口宽度不少于 110 列时，列表旁边显示选中插件的平台、最低 herdr 版本、topics、来源和版本。语言、star 数和日期属于整个仓库；对位于子目录的插件，仓库里不只有这一个插件。
+
 插件市场未经审核，安装前请先看预览。
 
 herdr 安装的插件总是注册为启用，所以对已禁用插件的更新、回退或其他重装会在之后重新禁用它；这需要正在运行的 herdr server，没有 server 时变更会在执行任何操作前被拒绝。安装失败时已安装的插件保持原样，每次变更都会报告插件之后的状态；无法读取该状态时，变更记为未确认，而不是完成。变更记录在 `$XDG_STATE_HOME/herdr-plugin-manager`（默认 `~/.local/state/herdr-plugin-manager`），供 `hpm rollback` 和 `hpm history` 读取。

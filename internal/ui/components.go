@@ -46,12 +46,17 @@ type field struct {
 // fields draws rows with their labels in one column as wide as the longest,
 // wrapping each value in the column after it.
 func (m *model) fields(rows []field) []string {
+	return m.fieldsIn(rows, m.w())
+}
+
+// fieldsIn draws rows as fields does, in a column total cells wide.
+func (m *model) fieldsIn(rows []field, total int) []string {
 	t := m.theme
 	width := 0
 	for _, r := range rows {
 		width = max(width, len(r.label))
 	}
-	room := max(m.w()-1-len(indent)-width-2, 20)
+	room := max(total-1-len(indent)-width-2, 20)
 	var out []string
 	for _, r := range rows {
 		lines := strings.Split(ansi.Wrap(r.value, room, ""), "\n")

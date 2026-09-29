@@ -336,13 +336,22 @@ func (m *model) viewList() string {
 		if m.order == market.ByRelevance && m.filters[tabBrowse].Value() == "" {
 			order = market.ByPopular.String()
 		}
-		count = counted(len(m.visibleEntries()), len(m.entries), "plugin") + " · by " + order
+		count = counted(len(m.visibleEntries()), len(m.entries), "plugin")
+		if m.filters[tabBrowse].Value() != "" {
+			count = fmt.Sprintf("%d of %d match", len(m.visibleEntries()), len(m.entries))
+		}
+		count += " · by " + order
 	}
 	right := t.faint.Render(count + " ")
 	f.SetWidth(max(m.w()-ansi.StringWidth(right)-6, 10))
 	left := indent + f.View()
-	if !f.Focused() && f.Value() == "" {
+	switch {
+	case !f.Focused() && f.Value() == "":
 		left = indent + t.accent.Render(f.Prompt) + t.faint.Render(f.Placeholder)
+	case !f.Focused():
+		// The search is kept while browsing its results; say how to change
+		// or drop it.
+		left = indent + t.accent.Render(f.Prompt) + t.text.Render(f.Value()) + t.faint.Render(m.keyHint(actSearch, "edits")+m.keyHint(actClose, "clears"))
 	}
 	filter := spread(left, right, m.w())
 
@@ -350,7 +359,7 @@ func (m *model) viewList() string {
 	if m.tab == tabInstalled {
 		body = m.installedItems()
 	} else {
-		body = m.browseItems()
+		body = m.browseBody()
 	}
 	return m.frame(m.tabBar(), &filter, body)
 }
@@ -502,53 +511,6 @@ func updateTarget(r updates.Result) string {
 	return "new commits"
 }
 
-func (m *model) browseItems() []string {
-	t := m.theme
-	entries := m.visibleEntries()
-	if src, ok := m.typedSource(); ok {
-		return m.empty("Not in the marketplace." + m.press(actOpen, "to preview "+src.String()+" from GitHub"))
-	}
-	if len(entries) == 0 {
-		if m.indexLoading || m.indexErr != nil {
-			return nil
-		}
-		return m.empty("No marketplace plugin matches.")
-	}
-	installed := m.installedIDs()
-	terms := market.Terms(m.filters[tabBrowse].Value())
-	var out []string
-	start, end := m.offset[tabBrowse], min(m.offset[tabBrowse]+m.pageSize(), len(entries))
-	for i := start; i < end; i++ {
-		e := entries[i]
-		selected := i == m.cursor[tabBrowse]
-		nameStyle, descStyle := m.itemStyles(selected)
-		name := e.Manifest.Name
-		if name == "" {
-			name = e.Manifest.ID
-		}
-		title := m.highlight(name, terms, nameStyle) + "  " + t.faint.Render(fmt.Sprintf("%s  %s %d", e.Manifest.Version, glyphStar, e.Repo.Stars))
-		if installed[e.Manifest.ID] {
-			title += "  " + mark(t.ok, glyphDone, "installed")
-		}
-		// The description line shows where the terms matched: the source,
-		// the description that mentions them, and any matching topics.
-		desc := e.Source.String()
-		shown := market.ShownDescription(e, terms)
-		// Topics are listed only for a term the visible text does not show.
-		var topics string
-		if matched := market.MatchedTopics(e, terms); len(matched) > 0 && !showsAll(name+" "+desc+" "+shown, terms) {
-			topics = " · topics: " + strings.Join(matched, ", ")
-		}
-		if d := shown; d != "" {
-			room := m.w() - 4 - ansi.StringWidth(desc+" · "+topics)
-			desc += " · " + market.Snippet(d, terms, max(room, 20))
-		}
-		line := m.highlight(desc+topics, terms, descStyle)
-		out = append(out, m.item(title, line, selected)...)
-	}
-	return out
-}
-
 func (m *model) viewDetail() string {
 	d := m.detail
 	var lines []string
@@ -586,7 +548,7 @@ func (m *model) detailLines(d *detail) []string {
 		return wrapIndented(indent+m.theme.err.Render(glyphFailed+" "+safe.Line(d.err.Error())), m.w()-1)
 	}
 	c := d.change
-	lines := m.previewLines(d.preview, c != nil)
+	lines := m.previewLines(d.preview, c != nil, d.entry)
 	if c == nil {
 		return lines
 	}
@@ -718,19 +680,16 @@ func (m *model) entryLines(e *market.Entry) []string {
 		out = append(out, wrapIndented(indent+t.fg2.Render(mf.Description), m.w()-1)...)
 	}
 	out = append(out, "")
-	out = append(out, m.fields([]field{
-		{"source", t.text.Render(e.Source.String())},
-		{"link", t.fg2.Render(e.Source.WebURL())},
-		{"runs on", m.runsOn(mf.Platforms, mf.MinHerdrVersion, len(problems) == 0)},
-	})...)
+	out = append(out, m.fields(m.entryFields(*e))...)
 	out = append(out, m.problems(problems)...)
 	return append(out, "", indent+t.faint.Render("Reading what it runs from the manifest…"))
 }
 
 // previewLines lay out an install or update preview: what the plugin is,
 // where it comes from, then what it runs. A change's preview leaves the
-// commit and what it replaces to the lines above it.
-func (m *model) previewLines(p *manager.Preview, change bool) []string {
+// commit and what it replaces to the lines above it. An install from the
+// marketplace adds what the listing says about the repository.
+func (m *model) previewLines(p *manager.Preview, change bool, e *market.Entry) []string {
 	t := m.theme
 	mf := p.Manifest
 	out := []string{m.titleLine(safe.Line(mf.Name), safe.Line(mf.Version), safe.Line(mf.ID))}
@@ -769,6 +728,13 @@ func (m *model) previewLines(p *manager.Preview, change bool) []string {
 		rows = append(rows, field{"replaces", t.text.Render(p.Existing.Version) + t.faint.Render(" from "+manager.SourceLabel(*p.Existing))})
 	}
 	rows = append(rows, field{"updates", t.fg2.Render(safe.Line(manager.TrackingAt(p.Ref, p.Commit).Describe()))})
+	if e != nil {
+		for _, f := range m.entryFields(*e) {
+			if f.label == "topics" || f.label == "repository" {
+				rows = append(rows, f)
+			}
+		}
+	}
 	out = append(out, m.fields(rows)...)
 	out = append(out, m.problems(p.Problems)...)
 	if len(p.Warnings) > 0 {

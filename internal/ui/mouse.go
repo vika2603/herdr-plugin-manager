@@ -75,6 +75,9 @@ func (m *model) clickList(ms tea.Mouse) tea.Cmd {
 	if row < 0 || row%itemHeight == itemHeight-1 || row/itemHeight >= m.pageSize() {
 		return nil
 	}
+	if list, pane := m.browseColumns(); m.tab == tabBrowse && pane > 0 && ms.X >= list {
+		return nil
+	}
 	i := m.offset[m.tab] + row/itemHeight
 	if i >= m.rowCount() {
 		return nil

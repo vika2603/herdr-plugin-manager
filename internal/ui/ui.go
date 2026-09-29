@@ -107,6 +107,8 @@ type model struct {
 	ops  *sync.WaitGroup
 	b    Backend
 	opts Options
+	// now is the clock, for how long ago a repository was pushed.
+	now func() time.Time
 
 	width, height int
 	tab           tab
@@ -257,6 +259,7 @@ func newModel(ctx context.Context, b Backend, opts Options) *model {
 		ops:     &sync.WaitGroup{},
 		b:       b,
 		opts:    opts,
+		now:     time.Now,
 		checks:  map[string]manager.Checked{},
 		readmes: map[string]cachedReadme{}, releases: map[string]cachedReleases{},
 		help:    help.New(),

@@ -48,7 +48,8 @@ stay distinct.
 | Component | Drawn as |
 | --- | --- |
 | Tab row | names with counts, the active one bold in the accent over a thick accent underline |
-| List item | two lines and a gap: name, version in `fg3`, marks; then the description in `fg2`. The selected item has `▌` in column 2, a bold name and an accent-tinted description |
+| List item | two lines and a gap: name, version in `fg3`, marks; then the description in `fg2`. The selected item has `▌` in column 2, a bold name and an accent-tinted description. A marketplace item's description comes before the repository's language and last push in `fg3`, which are marked `repo` for a plugin in a subdirectory and dropped when there is no room |
+| Listing | on a screen 110 columns wide or more, the selected marketplace plugin's field rows beside the list, after a `│` in `rule` |
 | Mark | glyph and word in its role's colour: `● enabled` `○ disabled` `↑ v1.1.0` `◆ local` `✓ installed` `✕ check failed` `▲ 2 warnings` `◇ pre-release` |
 | Title line | bold name, then `version · id` in `fg3`, then a mark |
 | Field rows | upper-case labels in `fg3` in one column as wide as the longest, values after two spaces, wrapped values aligned under the value column |
