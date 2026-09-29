@@ -792,12 +792,17 @@ func TestInstalledVersions(t *testing.T) {
 		h := start(t, b)
 		h.press("enter", "v")
 		out := h.words()
-		for _, want := range []string{"v1.1.0 latest", "default branch (main) · installed", "Reinstall the installed version", "Pin to the installed commit"} {
+		for _, want := range []string{"▌ v1.1.0 latest", "default branch (main) · installed", "Reinstall the installed version", "Pin to the installed commit"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("picker lacks %q:\n%s", want, out)
 			}
 		}
-		h.press("up", "enter")
+		// The default branch heads the list, the releases follow the newest
+		// first, and the latest release is selected, not the installed one.
+		if b, v11, v10 := strings.Index(out, "default branch (main)"), strings.Index(out, "v1.1.0 latest"), strings.Index(out, "v1.0.0"); b > v11 || v11 > v10 {
+			t.Errorf("picker order:\n%s", out)
+		}
+		h.press("down", "enter")
 		out = h.words()
 		if !strings.Contains(out, "Switch alpha") || !strings.Contains(out, "UPDATES follows new releases, installed at v1.0.0") || !strings.Contains(out, "i switch") {
 			t.Fatalf("no switch preview:\n%s", out)
@@ -810,7 +815,7 @@ func TestInstalledVersions(t *testing.T) {
 	t.Run("pin", func(t *testing.T) {
 		b := withCommit()
 		h := start(t, b)
-		h.press("enter", "v", "down", "down", "enter")
+		h.press("enter", "v", "down", "down", "down", "enter")
 		if out := h.words(); !strings.Contains(out, "Pin alpha") || !strings.Contains(out, "UPDATES pinned to commit aaaaaaaaaaaa") {
 			t.Fatalf("no pin preview:\n%s", out)
 		}
@@ -822,7 +827,7 @@ func TestInstalledVersions(t *testing.T) {
 	t.Run("reinstall at the installed version", func(t *testing.T) {
 		b := withCommit()
 		h := start(t, b)
-		h.press("enter", "v", "enter")
+		h.press("enter", "v", "up", "enter")
 		if out := h.words(); !strings.Contains(out, "Reinstall alpha") {
 			t.Fatalf("choosing the installed version should preview a reinstall:\n%s", out)
 		}
@@ -1210,7 +1215,7 @@ func TestMouseChoosesAVersion(t *testing.T) {
 	x, y := h.at("v1.0.0")
 	click := tea.MouseClickMsg{X: x, Y: y, Button: tea.MouseLeft}
 	h.mouse(click)
-	if h.m.detail.versions == nil || h.m.detail.versions.cursor != 1 {
+	if vp := h.m.detail.versions; vp == nil || vp.rows[vp.cursor].ref != "v1.0.0" {
 		t.Fatalf("a click should select v1.0.0:\n%s", h.screen())
 	}
 	h.mouse(click)

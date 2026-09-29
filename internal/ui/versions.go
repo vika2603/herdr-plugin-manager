@@ -88,14 +88,15 @@ const (
 	columnGap = 3
 )
 
-// versionRows are the release tags and the default branch.
+// versionRows are the default branch, then the release tags, the newest
+// first as releases lists them.
 func versionRows(releases []string, defaultBranch string) []pickRow {
 	rows := make([]pickRow, 0, len(releases)+1)
-	for _, tag := range releases {
-		rows = append(rows, pickRow{ref: tag})
-	}
 	if defaultBranch != "" {
 		rows = append(rows, pickRow{ref: defaultBranch, branch: true})
+	}
+	for _, tag := range releases {
+		rows = append(rows, pickRow{ref: tag})
 	}
 	return rows
 }
@@ -170,13 +171,21 @@ func (m *model) onVersions(msg versionsMsg) tea.Cmd {
 	return m.showPicker(d, vp)
 }
 
-// showPicker opens vp on its current version, and reads the repository's
+// showPicker opens vp at the top of the list on the latest stable
+// release, else the latest release, else the default branch; the version
+// shown or installed is marked, not selected. It reads the repository's
 // release notes unless they were read before.
 func (m *model) showPicker(d *detail, vp *versionPicker) tea.Cmd {
 	vp.rendered = map[string][]string{}
+	want := latestRelease(vp.releases)
+	if want == "" && len(vp.releases) > 0 {
+		want = vp.releases[0]
+	}
+	vp.cursor, vp.offset = 0, 0
 	for i, r := range vp.rows {
-		if r.kind == "" && r.ref == vp.current {
+		if r.kind == "" && !r.branch && r.ref == want {
 			vp.cursor = i
+			break
 		}
 	}
 	d.versions = vp
