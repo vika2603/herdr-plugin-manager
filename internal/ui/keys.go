@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -15,7 +16,7 @@ type helpKeys struct {
 	details, toggle, update, all, check, remove, reload, logs, refresh, sort, install,
 	apply, browse, instTab, open, keep, clear, move, yes, no, cont, home, info, readme,
 	version, choose, cancel, notes, step, preview, rollback, applyReview, include, reviewed, leave,
-	stop, running, retry, history, entry, doctor, recheck key.Binding
+	stop, running, retry, history, entry, doctor, recheck, notesTab key.Binding
 }
 
 func newHelpKeys(km keymap) helpKeys {
@@ -76,6 +77,7 @@ func newHelpKeys(km keymap) helpKeys {
 		stop: fixed("ctrl+c", "cancel"), running: fixed("any key", "back, it keeps running"),
 		retry: first(actRetry, "retry"), history: first(actHistory, "history"), entry: first(actOpen, "output"),
 		doctor: first(actDoctor, "diagnostics"), recheck: first(actReload, "check again"),
+		notesTab: first(actSwitch, "notes"),
 	}
 }
 
@@ -95,7 +97,22 @@ func (k keyMap) FullHelp() [][]key.Binding {
 	return k.full
 }
 
+// keyMap is the help for the current screen. Every screen's bar ends with
+// the help key, which lists all of the screen's keys when some do not fit.
 func (m *model) keyMap() keyMap {
+	k := m.screenKeys()
+	if m.confirm != nil || m.screen == screenList {
+		return k
+	}
+	var full [][]key.Binding
+	for chunk := range slices.Chunk(k.short, 4) {
+		full = append(full, slices.Clone(chunk))
+	}
+	full = append(full, []key.Binding{m.helpKeys.less})
+	return keyMap{short: append(slices.Clone(k.short), m.moreKey()), full: full}
+}
+
+func (m *model) screenKeys() keyMap {
 	h := m.helpKeys
 	if m.confirm != nil {
 		return keyMap{short: []key.Binding{h.yes, h.no}}
@@ -119,6 +136,10 @@ func (m *model) keyMap() keyMap {
 	case screenDetail:
 		d := m.detail
 		if d.versions != nil {
+			if d.versions.listWidth == m.w() {
+				// Too narrow for the notes beside the list.
+				return keyMap{short: []key.Binding{h.choose, h.notesTab, h.step, h.notes, h.cancel}}
+			}
 			return keyMap{short: []key.Binding{h.choose, h.step, h.notes, h.cancel}}
 		}
 		other := h.info

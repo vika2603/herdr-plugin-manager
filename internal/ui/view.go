@@ -120,7 +120,7 @@ func (m *model) keyHint(a action, what string) string {
 
 func (m *model) helpLines() []string {
 	k := m.keyMap()
-	if m.showHelp && m.screen == screenList && m.confirm == nil && !m.filters[m.tab].Focused() {
+	if m.showHelp && m.confirm == nil && (m.screen != screenList || !m.filters[m.tab].Focused()) {
 		return strings.Split(m.help.FullHelpView(k.FullHelp()), "\n")
 	}
 	return []string{m.shortHelp(k.ShortHelp())}

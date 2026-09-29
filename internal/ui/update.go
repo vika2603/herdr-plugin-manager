@@ -439,6 +439,9 @@ func (m *model) keyDetail(k string) (tea.Model, tea.Cmd) {
 	a := m.keys.action(k, onDetail)
 	offset := &d.offsets[d.view]
 	switch a {
+	case actHelp:
+		m.showHelp = !m.showHelp
+		return m, nil
 	case actBack, actQuit:
 		m.screen, m.detail = screenList, nil
 		if d.review != nil {
@@ -544,6 +547,9 @@ func changeKey(d *detail) (a action, verb string) {
 // prints. Any other key goes back, leaving a running operation running.
 func (m *model) keyOutput(a action) (tea.Model, tea.Cmd) {
 	switch a {
+	case actHelp:
+		m.showHelp = !m.showHelp
+		return m, nil
 	case actUp:
 		m.outputOffset = max(m.outputOffset-1, 0)
 	case actDown:

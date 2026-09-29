@@ -108,7 +108,9 @@ and `r` retries a change that failed. On the command line, `ctrl+c` stops
 
 An install takes the latest release of a plugin at the root of its
 repository, else the default branch; `v` in the preview chooses another
-version and shows its release notes.
+version and shows its release notes, beside the versions or, on a narrow
+screen, in their place with `tab`. On every screen `?` lists the keys the
+bar at the bottom has no room for.
 
 `hpm keys` lists the keys and the config file that changes them and the
 colours:

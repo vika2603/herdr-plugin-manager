@@ -50,6 +50,8 @@ func (m *model) keyHistory(a action) (tea.Model, tea.Cmd) {
 		}
 	case actReload:
 		return m, m.openHistory()
+	case actHelp:
+		m.showHelp = !m.showHelp
 	case actClose, actQuit:
 		m.screen, m.history = screenList, nil
 	default:

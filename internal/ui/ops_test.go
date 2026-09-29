@@ -15,6 +15,7 @@ import (
 	"github.com/vika2603/herdr-client/herdr"
 
 	"github.com/vika2603/herdr-plugin-manager/internal/manager"
+	"github.com/vika2603/herdr-plugin-manager/internal/market"
 	"github.com/vika2603/herdr-plugin-manager/internal/source"
 	"github.com/vika2603/herdr-plugin-manager/internal/updates"
 )
@@ -382,5 +383,31 @@ func TestRetryOfAnEnabledStateChangeSetsTheStateAgain(t *testing.T) {
 	h.press("r")
 	if !slices.Contains(b.Calls(), "set-enabled beta true") {
 		t.Errorf("calls = %q, want beta enabled again", b.Calls())
+	}
+}
+
+// Too narrow for the notes beside the version list, tab shows them in its
+// place, and ? lists every key the short help bar has no room for.
+func TestNarrowScreenReachesNotesAndEveryKey(t *testing.T) {
+	b := newFake()
+	b.preview.Ref, b.preview.DefaultBranch = "v1.1.0", "main"
+	b.preview.Releases = []string{"v1.1.0", "v1.0.0"}
+	b.releases = []market.Release{{Tag: "v1.1.0", Name: "Faster gadgets", Notes: "Gadgets start twice as fast."}}
+	h := start(t, b)
+	h.m.Update(tea.WindowSizeMsg{Width: 44, Height: 30})
+	h.press("tab", "enter", "v")
+	if out := h.words(); strings.Contains(out, "twice as fast") || !strings.Contains(out, "tab notes") {
+		t.Fatalf("a narrow picker should show the list and how to reach the notes:\n%s", out)
+	}
+	h.press("tab")
+	if out := h.words(); !strings.Contains(out, "Faster gadgets") || !strings.Contains(out, "twice as fast") {
+		t.Errorf("tab did not show the notes of v1.1.0:\n%s", out)
+	}
+	h.press("esc", "?")
+	out := h.words()
+	for _, want := range []string{"i install", "v version", "w homepage", "? less"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("? does not list %q on a narrow preview:\n%s", want, out)
+		}
 	}
 }

@@ -33,11 +33,20 @@ type versionPicker struct {
 	offset, notesOffset int
 	// listWidth is the list column's width at the last render, for clicks.
 	listWidth int
+	// notesOnly shows the selected version's notes in place of the list,
+	// on a screen too narrow for both.
+	notesOnly bool
 
 	loading bool
 	// rendered caches the notes of each tag for renderedWidth.
 	rendered      map[string][]string
 	renderedWidth int
+}
+
+// showingNotesOnly reports whether the notes are shown in place of the
+// list, on a screen width cells wide.
+func (vp *versionPicker) showingNotesOnly(width int) bool {
+	return vp.notesOnly && vp.listWidth == width
 }
 
 // pickRow is a version, or with kind set a change to the installed plugin
@@ -231,6 +240,12 @@ func (m *model) keyVersions(d *detail, a action) tea.Cmd {
 		vp.notesOffset += m.listRows()
 	case actOpen:
 		return m.chooseVersion(d, vp.rows[vp.cursor])
+	case actSwitch:
+		// Too narrow for the notes beside the list, the picker shows one
+		// or the other.
+		vp.notesOnly = !vp.notesOnly
+	case actHelp:
+		m.showHelp = !m.showHelp
 	case actBack, actQuit, actVersion:
 		d.versions = nil
 	default:
@@ -308,6 +323,13 @@ func (m *model) versionLines(d *detail) []string {
 	notesWidth := m.w() - vp.listWidth - 2
 	if notesWidth < minNotesWidth {
 		vp.listWidth = m.w()
+		if vp.notesOnly {
+			notes := m.notesColumn(d, m.w()-len(indent)-1)
+			for i := range notes {
+				notes[i] = indent + notes[i]
+			}
+			return notes
+		}
 		return left
 	}
 	right := m.notesColumn(d, notesWidth)

@@ -35,7 +35,7 @@ func (m *model) wheel(ms tea.Mouse) {
 		m.move(a)
 	case screenDetail:
 		if d := m.detail; d.versions != nil {
-			if ms.X >= d.versions.listWidth {
+			if ms.X >= d.versions.listWidth || d.versions.showingNotesOnly(m.w()) {
 				d.versions.notesOffset = max(d.versions.notesOffset+lines, 0)
 			} else {
 				m.keyVersions(d, a)
@@ -104,7 +104,7 @@ func (m *model) clickDetail(ms tea.Mouse) tea.Cmd {
 		row := ms.Y - detailBodyTop - versionsTop
 		i := vp.offset + row
 		switch {
-		case ms.X >= vp.listWidth || row < 0 || i >= len(vp.rows):
+		case ms.X >= vp.listWidth || vp.showingNotesOnly(m.w()) || row < 0 || i >= len(vp.rows):
 		case i == vp.cursor:
 			return m.chooseVersion(d, vp.rows[i])
 		default:

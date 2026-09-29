@@ -93,6 +93,8 @@ func (m *model) keyDoctor(a action) (tea.Model, tea.Cmd) {
 		v.offset = 0
 	case actReload:
 		return m, m.openDoctor()
+	case actHelp:
+		m.showHelp = !m.showHelp
 	case actClose, actQuit:
 		m.screen, m.doctor = screenList, nil
 	default:

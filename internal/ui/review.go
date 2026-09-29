@@ -95,6 +95,8 @@ func (m *model) keyReview(a action) (tea.Model, tea.Cmd) {
 		m.openReviewed(b.items[b.cursor])
 	case actUpdate, actUpdateAll:
 		m.askApplyReview()
+	case actHelp:
+		m.showHelp = !m.showHelp
 	case actClose, actQuit:
 		m.screen, m.review = screenList, nil
 	default:
