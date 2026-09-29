@@ -117,6 +117,17 @@ func (f *fakeBackend) Explain(_ context.Context, p herdr.InstalledPluginInfo, pr
 	return manager.Explanation{Headline: "Changes to " + p.PluginID, From: p.Version, To: preview.Manifest.Version}
 }
 
+func (f *fakeBackend) Review(ctx context.Context, ch manager.Checked, herdrVersion string) manager.Review {
+	r := manager.Review{Checked: ch}
+	res := ch.Result
+	r.Preview, r.Err = f.PreviewAt(ctx, res.Source, res.TargetRef, res.TargetCommit, herdrVersion, nil)
+	if r.Err == nil {
+		r.Preview.RequireID(ch.Plugin.PluginID)
+		r.Explain = f.Explain(ctx, ch.Plugin, r.Preview)
+	}
+	return r
+}
+
 func (f *fakeBackend) Versions(_ context.Context, src source.GitHub) (manager.Versions, error) {
 	f.record("versions %s", src)
 	return f.versions, nil
@@ -433,9 +444,9 @@ func TestUpdateAllSkipsFailedChecks(t *testing.T) {
 	b := newFake()
 	b.checkErrs = map[string]error{"beta": errors.New("could not reach GitHub")}
 	h := start(t, b)
-	h.press("U")
-	if h.m.confirm == nil || !strings.Contains(h.m.confirm.prompt, "Update 1 plugins?") {
-		t.Fatalf("U did not ask to update alpha: %+v", h.m.confirm)
+	h.press("U", "u")
+	if h.m.confirm == nil || !strings.Contains(h.m.confirm.prompt, "Update 1 plugin?") {
+		t.Fatalf("the review did not ask to update alpha: %+v", h.m.confirm)
 	}
 	h.press("y")
 	if got := b.Calls(); !slices.Contains(got, "update alpha v1.1.0") || slices.ContainsFunc(got, func(c string) bool { return strings.HasPrefix(c, "update beta") }) {
@@ -494,7 +505,7 @@ func TestUpdateShowsPreviewFirst(t *testing.T) {
 func TestUpdateAll(t *testing.T) {
 	b := newFake()
 	h := start(t, b)
-	h.press("U", "y")
+	h.press("U", "u", "y")
 	want := []string{`preview o/alpha "c1"`, "update alpha v1.1.0"}
 	if got := b.Calls(); !slices.Equal(got, want) {
 		t.Fatalf("calls = %q, want %q", got, want)
@@ -505,14 +516,75 @@ func TestUpdateAllSkipsWhatCannotRunHere(t *testing.T) {
 	b := newFake()
 	b.preview.Problems = []string{"requires herdr 9.9.9, running 0.9.1"}
 	h := start(t, b)
-	h.press("U", "y")
+	h.press("U")
+	if out := h.words(); !strings.Contains(out, "alpha 1.0.0 ✕ cannot update") || !strings.Contains(out, "requires herdr 9.9.9, running 0.9.1") {
+		t.Errorf("the review does not explain why alpha cannot update:\n%s", out)
+	}
+	h.press("space", "u")
 	for _, c := range b.Calls() {
 		if strings.HasPrefix(c, "update") {
 			t.Fatalf("updated despite problems: %q", b.Calls())
 		}
 	}
-	if h.m.screen != screenOutput || !strings.Contains(h.screen(), "requires herdr 9.9.9") {
-		t.Errorf("the skipped update is not explained:\n%s", h.screen())
+	if h.m.confirm != nil || !strings.Contains(h.words(), "No update is included") {
+		t.Errorf("nothing can be applied, yet:\n%s", h.words())
+	}
+}
+
+// twoUpdates is newFake with updates for both alpha and beta.
+func twoUpdates() *fakeBackend {
+	b := newFake()
+	b.checks["beta"] = updates.Result{Kind: updates.Available, Source: source.GitHub{Owner: "o", Repo: "beta"}, TargetRef: "v2.0.0", TargetCommit: "c2"}
+	return b
+}
+
+func TestReviewLeavesOutWhatTheUserExcludes(t *testing.T) {
+	b := twoUpdates()
+	b.explain = &manager.Explanation{Headline: "New release v1.1.0, replacing v1.0.0", Runs: []string{"+ build: make"}}
+	h := start(t, b)
+	h.press("U")
+	out := h.words()
+	for _, want := range []string{"Installed › Review 2 updates", "alpha 1.0.0 ● included", "New release v1.1.0, replacing v1.0.0 · what it runs changes", "2 of 2 included · u updates them"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("review lacks %q:\n%s", want, out)
+		}
+	}
+	h.press("down", "space")
+	if out := h.words(); !strings.Contains(out, "beta 1.0.0 ○ left out") || !strings.Contains(out, "1 of 2 included") {
+		t.Fatalf("beta was not left out:\n%s", out)
+	}
+	h.press("u", "y")
+	got := b.Calls()
+	if !slices.Contains(got, "update alpha v1.1.0") || slices.ContainsFunc(got, func(c string) bool { return strings.HasPrefix(c, "update beta") }) {
+		t.Errorf("calls = %q, want alpha updated and beta left out", got)
+	}
+	if h.m.screen != screenList || !strings.Contains(h.words(), "Updated 1 plugin") {
+		t.Errorf("after the review:\n%s", h.words())
+	}
+	h.press("o")
+	if out := h.words(); !strings.Contains(out, "== beta: left out") || !strings.Contains(out, "== alpha (1 of 1)") {
+		t.Errorf("the output does not account for each update:\n%s", out)
+	}
+}
+
+func TestReviewOpensEachUpdateInFull(t *testing.T) {
+	b := twoUpdates()
+	h := start(t, b)
+	h.press("U", "enter")
+	if h.m.screen != screenDetail || !strings.Contains(h.words(), "Review › Update alpha") || !strings.Contains(h.words(), "esc back") {
+		t.Fatalf("enter did not show alpha's update:\n%s", h.words())
+	}
+	h.press("u")
+	if slices.ContainsFunc(b.Calls(), func(c string) bool { return strings.HasPrefix(c, "update") }) {
+		t.Fatalf("u in a reviewed update applied it alone: %q", b.Calls())
+	}
+	h.press("esc")
+	if h.m.screen != screenReview {
+		t.Errorf("esc did not return to the review: %v", h.m.screen)
+	}
+	h.press("esc")
+	if h.m.screen != screenList || h.m.review != nil {
+		t.Errorf("esc did not leave the review")
 	}
 }
 

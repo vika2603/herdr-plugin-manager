@@ -273,7 +273,7 @@ func (e Explanation) Sections() []Section {
 	case e.Commits != nil:
 		out = append(out, Section{Title: "Commits", Note: e.CommitsNote(), Lines: e.CommitLines(20)})
 	case e.NotesErr != nil:
-		out = append(out, Section{Title: "Release notes", Lines: []string{"unknown: " + e.NotesErr.Error()}})
+		out = append(out, Section{Title: "What changed", Lines: []string{"not known: " + e.NotesErr.Error()}})
 	}
 	runs := e.Runs
 	if len(runs) == 0 {

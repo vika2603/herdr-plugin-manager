@@ -270,8 +270,8 @@ func TestUpdateSkipsAPluginWhoseIDChanged(t *testing.T) {
 	h.setInstalled(`{"result":{"type":"plugin_list","plugins":[{"plugin_id":"o.r","name":"R","version":"1","enabled":true,` +
 		`"manifest_path":"/x","plugin_root":"/x","source":{"kind":"github","owner":"o","repo":"r","resolved_commit":"` + older + `"}}]}}`)
 	_, stderr, err := h.run("", false, "update", "--yes")
-	if err == nil || !strings.Contains(err.Error(), "not updated: o.r") {
-		t.Errorf("err = %v, want o.r reported as not updated", err)
+	if err == nil || !strings.Contains(err.Error(), "cannot update: o.r") {
+		t.Errorf("err = %v, want o.r reported as not updatable", err)
 	}
 	if !strings.Contains(stderr, "skipping o.r") {
 		t.Errorf("stderr lacks the reason:\n%s", stderr)
@@ -385,7 +385,7 @@ func TestUpdateReportsFailedChecks(t *testing.T) {
 		h := newCheckHarness(t, "b")
 		h.manifestIDs["o/a"] = "someone.else"
 		_, _, err := h.run("", false, "update", "--yes")
-		if err == nil || !strings.Contains(err.Error(), "update check failed: o.b") || !strings.Contains(err.Error(), "not updated: o.a") {
+		if err == nil || !strings.Contains(err.Error(), "update check failed: o.b") || !strings.Contains(err.Error(), "cannot update: o.a") {
 			t.Errorf("err = %v, want both failures", err)
 		}
 	})
@@ -532,4 +532,62 @@ func TestVersionChanges(t *testing.T) {
 			t.Errorf("calls = %q", h.calls())
 		}
 	})
+}
+
+// newTwoUpdates installs o.a and o.c, both behind the remote.
+func newTwoUpdates(t *testing.T) *harness {
+	t.Helper()
+	h := newHarness(t)
+	h.manifestIDs["o/a"], h.manifestIDs["o/c"] = "o.a", "o.c"
+	h.setInstalled(githubPlugins(map[string]string{"a": older, "c": older}))
+	h.installs(githubPlugins(map[string]string{"a": head, "c": head}))
+	return h
+}
+
+func TestUpdateListsThePlanFirst(t *testing.T) {
+	h := newTwoUpdates(t)
+	out, _, err := h.run("", false, "update", "--yes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := strings.Index(out, "2 updates:")
+	first := strings.Index(out, "== o.a")
+	if plan < 0 || first < plan || !strings.Contains(out[plan:first], "o.a  New commits on the default branch; version 1 -> 0.2.0") {
+		t.Errorf("the plan does not come first, one line each:\n%s", out)
+	}
+	if !h.ran("plugin install o/a --yes") || !h.ran("plugin install o/c --yes") {
+		t.Errorf("calls = %q", h.calls())
+	}
+}
+
+func TestUpdateExcludes(t *testing.T) {
+	h := newTwoUpdates(t)
+	out, _, err := h.run("", false, "update", "--yes", "--exclude", "o.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "o.c: excluded") || strings.Contains(out, "== o.c") {
+		t.Errorf("o.c was not left out:\n%s", out)
+	}
+	if !h.ran("plugin install o/a --yes") || h.ran("plugin install o/c") {
+		t.Errorf("calls = %q", h.calls())
+	}
+	if _, _, err := h.run("", false, "update", "--exclude", "o.nope"); err == nil || !strings.Contains(err.Error(), `--exclude: plugin "o.nope" is not installed`) {
+		t.Errorf("an unknown exclude: %v", err)
+	}
+}
+
+func TestUpdateDryRun(t *testing.T) {
+	h := newTwoUpdates(t)
+	h.manifestIDs["o/c"] = "someone.else"
+	out, _, err := h.run("", false, "update", "--dry-run")
+	if !strings.Contains(out, "Dry run: nothing was changed.") || !strings.Contains(out, "Build commands") {
+		t.Errorf("a dry run does not show the updates in full:\n%s", out)
+	}
+	if err == nil || err.Error() != "cannot update: o.c" {
+		t.Errorf("err = %v, want the update that cannot run reported", err)
+	}
+	if h.ran("plugin install") {
+		t.Errorf("a dry run installed: %q", h.calls())
+	}
 }

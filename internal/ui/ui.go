@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -40,6 +39,7 @@ type Backend interface {
 	PlanRollback(ctx context.Context, id string) (manager.Undo, error)
 	Versions(ctx context.Context, src source.GitHub) (manager.Versions, error)
 	Explain(ctx context.Context, p herdr.InstalledPluginInfo, preview *manager.Preview) manager.Explanation
+	Review(ctx context.Context, ch manager.Checked, herdrVersion string) manager.Review
 	PreviewAt(ctx context.Context, src source.GitHub, ref, commit, herdrVersion string, installed []herdr.InstalledPluginInfo) (*manager.Preview, error)
 	Rollback(ctx context.Context, u manager.Undo, out io.Writer) manager.Outcome
 	CheckAll(ctx context.Context, plugins []herdr.InstalledPluginInfo) []manager.Checked
@@ -97,6 +97,8 @@ const (
 	screenList screen = iota
 	screenDetail
 	screenOutput
+	// screenReview is the review of several updates before they run.
+	screenReview
 )
 
 // logLimit is how many command logs the detail view asks for.
@@ -141,6 +143,8 @@ type model struct {
 
 	detail  *detail
 	confirm *confirm
+	// review is open while the available updates are reviewed together.
+	review *batchReview
 	// readmes keeps the READMEs read in this session, by source and ref.
 	// palettes are the colours of the two backgrounds, and themeMode the
 	// config's choice between them; "" or auto follows the terminal.
@@ -192,6 +196,8 @@ type detail struct {
 	entry *market.Entry
 	// versions is open while the user picks another version to preview.
 	versions *versionPicker
+	// review is the batch review the detail was opened from.
+	review *batchReview
 	// explain describes a change's preview once it is read, and notes are
 	// its release notes rendered at notesWidth.
 	explain    *manager.Explanation
@@ -523,52 +529,6 @@ func (m *model) applyChange(c pendingChange) tea.Cmd {
 		}
 		return o.Summary(), o.Error()
 	})
-}
-
-// updateAll updates each plugin in turn. Each new manifest is still checked
-// the way a single update's preview is, and one that cannot run here is
-// skipped.
-func (m *model) updateAll(list []manager.Checked) tea.Cmd {
-	list = slices.Clone(list)
-	for i := range list {
-		list[i].Plugin = m.current(list[i].Plugin)
-	}
-	version := m.herdrVersion
-	return m.operation(fmt.Sprintf("Updating %d plugins", len(list)), func(out io.Writer) (string, error) {
-		var failed []string
-		for _, ch := range list {
-			id := ch.Plugin.PluginID
-			fmt.Fprintf(out, "== %s: %s\n", id, ch.Result.Describe())
-			if err := m.updateChecked(ch, version, out); err != nil {
-				fmt.Fprintf(out, "%v\n", err)
-				failed = append(failed, id)
-			}
-		}
-		if len(failed) > 0 {
-			return "", fmt.Errorf("not updated: %s", strings.Join(failed, ", "))
-		}
-		return fmt.Sprintf("Updated %d plugins", len(list)), nil
-	})
-}
-
-// updateChecked previews one update and applies it when nothing stands in
-// its way.
-func (m *model) updateChecked(ch manager.Checked, herdrVersion string, out io.Writer) error {
-	p, err := m.b.Preview(m.ctx, ch.Result.Source, ch.Result.TargetCommit, "", herdrVersion, nil)
-	if err != nil {
-		return err
-	}
-	p.RequireID(ch.Plugin.PluginID)
-	if len(p.Problems) > 0 {
-		return fmt.Errorf("skipped: %s", strings.Join(p.Problems, "; "))
-	}
-	c := updateChange(ch)
-	o := m.b.Apply(m.ctx, manager.Change{Kind: c.kind, ID: ch.Plugin.PluginID, Current: &ch.Plugin, Target: c.target}, out)
-	if err := o.Error(); err != nil {
-		return err
-	}
-	fmt.Fprintln(out, o.Summary())
-	return nil
 }
 
 func (m *model) uninstall(id string) tea.Cmd {

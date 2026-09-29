@@ -104,6 +104,8 @@ func (m *model) result(msg tea.Msg) (tea.Cmd, bool) {
 		msg.d.loading = false
 		msg.d.preview, msg.d.err = msg.preview, msg.err
 		return m.loadExplain(msg.d), true
+	case reviewMsg:
+		onReview(msg)
 	case explainMsg:
 		msg.d.explain = &msg.explain
 	case readmeMsg:
@@ -173,14 +175,14 @@ func (m *model) onEnabled(msg enabledMsg) {
 // onOpDone ends an install, update or uninstall: a failure opens herdr's
 // output, a success returns to the list. Either way the list is reloaded.
 func (m *model) onOpDone(msg opDoneMsg) tea.Cmd {
-	m.busy = ""
+	m.busy, m.review = "", nil
 	m.output = output{title: msg.title, text: msg.output, err: msg.err}
 	if msg.err != nil {
 		m.setStatus(msg.err.Error(), true)
 		m.screen, m.detail, m.outputOffset = screenOutput, nil, 0
 	} else {
 		m.setStatus(msg.done+" · o shows herdr's output", false)
-		if m.screen == screenDetail {
+		if m.screen == screenDetail || m.screen == screenReview {
 			m.screen, m.detail = screenList, nil
 		}
 	}
@@ -189,7 +191,8 @@ func (m *model) onOpDone(msg opDoneMsg) tea.Cmd {
 
 // spinning reports whether anything the status line shows is in progress.
 func (m *model) spinning() bool {
-	return m.busy != "" || m.indexLoading || m.checking || (m.detail != nil && m.detail.loading)
+	return m.busy != "" || m.indexLoading || m.checking || (m.detail != nil && m.detail.loading) ||
+		(m.review != nil && m.review.loading() > 0)
 }
 
 // withSpinner starts the spinner along with cmd unless it is already
@@ -220,6 +223,8 @@ func (m *model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.keyOutput(m.keys.action(k, onOutput))
 	case screenDetail:
 		return m.keyDetail(k)
+	case screenReview:
+		return m.keyReview(m.keys.action(k, onList))
 	case screenList:
 	}
 
@@ -338,11 +343,7 @@ func (m *model) installedAction(a action) (tea.Model, tea.Cmd) {
 		if !m.idle() {
 			return m, nil
 		}
-		m.confirm = &confirm{
-			prompt: fmt.Sprintf("Update %d plugins? Their build commands run again", len(list)),
-			run:    func() tea.Cmd { return m.updateAll(list) },
-		}
-		return m, nil
+		return m, m.openReview(list)
 	default:
 	}
 	p, ok := m.selectedInstalled()
@@ -419,6 +420,9 @@ func (m *model) keyDetail(k string) (tea.Model, tea.Cmd) {
 	switch a {
 	case actBack, actQuit:
 		m.screen, m.detail = screenList, nil
+		if d.review != nil {
+			m.screen = screenReview
+		}
 		return m, nil
 	case actSwitch:
 		return m, m.switchView(d)
@@ -477,6 +481,10 @@ func (m *model) keyDetail(k string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if a != want || d.loading || d.preview == nil {
+		return m, nil
+	}
+	if d.review != nil {
+		m.setStatus("The review applies its updates together."+m.press(actBack, "to return to it"), false)
 		return m, nil
 	}
 	if len(d.preview.Problems) > 0 {

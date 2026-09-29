@@ -42,6 +42,8 @@ func (m *model) View() tea.View {
 		content = m.viewDetail()
 	case screenOutput:
 		content = m.viewOutput()
+	case screenReview:
+		content = m.viewReview()
 	default:
 		content = m.viewList()
 	}
@@ -75,7 +77,7 @@ func (m *model) bodyHeight() int {
 		chrome = listChrome
 	case screenDetail:
 		chrome = detailChrome
-	case screenOutput:
+	case screenOutput, screenReview:
 	}
 	return max(m.h()-chrome-len(m.helpLines()), 1)
 }
@@ -278,6 +280,9 @@ func (m *model) statusLine() string {
 		return " " + t.ok.Render(glyphDone) + " " + t.text.Render(m.status)
 	}
 	progress := func(text string) string { return " " + m.spinner.View() + " " + t.fg2.Render(text) }
+	if m.screen == screenReview {
+		return m.reviewStatus()
+	}
 	if m.screen != screenList {
 		if m.spinning() {
 			return progress("Reading the manifest from GitHub…")

@@ -47,7 +47,9 @@ description = "Manage plugins"
 
 打开弹窗，或不带参数运行 `hpm`，在终端里打开同样的界面。按 `?` 查看所有按键；鼠标可以滚动，单击选中，再次单击打开。
 在预览里按 `i` 安装，预览会列出插件将运行的命令。安装位于仓库根目录的插件时默认装最新的 release，其他情况装默认分支；
-在预览里按 `v` 可以选择其他版本，并查看它的 release notes。对已安装的插件，`v` 列出可切换的版本，也可以重装、固定或解除固定；`z` 回退最近一次变更。更新或其他变更的预览先说明变更的性质，例如新的 release，或者所跟踪分支上有新提交而版本号不变；然后展示 release notes（没有时展示提交标题），以及插件会运行的内容有哪些变化。无法读取 GitHub 时，预览会说明变化内容未知。
+在预览里按 `v` 可以选择其他版本，并查看它的 release notes。
+
+按 `U` 会在执行前审阅所有可用更新：每个更新改变了什么，以及哪些无法在当前环境运行。`space` 排除某个更新，`enter` 查看完整内容，`u` 应用其余更新。每次安装前会立即检查 ref 是否仍指向审阅过的 commit，安装后核对 herdr 的记录；herdr 自己拉取 ref，所以两次检查之间的推送只能在构建命令运行之后发现，并会被报告。对已安装的插件，`v` 列出可切换的版本，也可以重装、固定或解除固定；`z` 回退最近一次变更。更新或其他变更的预览先说明变更的性质，例如新的 release，或者所跟踪分支上有新提交而版本号不变；然后展示 release notes（没有时展示提交标题），以及插件会运行的内容有哪些变化。无法读取 GitHub 时，预览会说明变化内容未知。
 
 `hpm keys` 列出所有按键，以及用来修改按键和颜色的配置文件：
 
@@ -69,7 +71,7 @@ accent = "teal"    # indigo、teal、magenta 或 "#RRGGBB"
 | `hpm install <owner/repo>` | 预览并安装 |
 | `hpm uninstall <id>` | 卸载 |
 | `hpm enable <id>` / `hpm disable <id>` | 启用或禁用 |
-| `hpm outdated` / `hpm update [id...]` | 检查并应用更新；任一检查失败时以错误退出 |
+| `hpm outdated` / `hpm update [id...]` | 检查并应用更新；任一检查失败时以错误退出；`--exclude` 排除插件，`--dry-run` 只展示不执行 |
 | `hpm rollback <id>` | 撤销本管理器对插件做的最近一次变更 |
 | `hpm history [id]` | 对插件做过的变更，以及 herdr 的输出 |
 | `hpm switch <id> <ref>` | 安装另一个版本：release、分支或 commit |

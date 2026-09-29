@@ -108,7 +108,7 @@ func TestExplainSaysWhenNothingCanBeRead(t *testing.T) {
 	for _, s := range e.Sections() {
 		text.WriteString(s.Title + ": " + strings.Join(s.Lines, " / ") + "\n")
 	}
-	if !strings.Contains(text.String(), "Release notes: unknown: ") {
+	if !strings.Contains(text.String(), "What changed: not known: ") {
 		t.Errorf("sections:\n%s", text.String())
 	}
 }

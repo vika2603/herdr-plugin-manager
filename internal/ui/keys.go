@@ -14,7 +14,7 @@ type helpKeys struct {
 	up, down, page, ends, scroll, back, quit, more, less, filter, search, output,
 	details, toggle, update, all, check, remove, reload, logs, refresh, sort, install,
 	apply, browse, instTab, open, keep, clear, move, yes, no, cont, home, info, readme,
-	version, choose, cancel, notes, step, preview, rollback key.Binding
+	version, choose, cancel, notes, step, preview, rollback, applyReview, include, reviewed, leave key.Binding
 }
 
 func newHelpKeys(km keymap) helpKeys {
@@ -69,7 +69,9 @@ func newHelpKeys(km keymap) helpKeys {
 		home: first(actHomepage, "homepage"), info: first(actSwitch, "info"), readme: first(actSwitch, "readme"),
 		version: first(actVersion, "version"), choose: first(actOpen, "choose"), cancel: first(actBack, "cancel"),
 		notes: pair(actPageUp, actPageDown, "scroll notes"), step: pair(actUp, actDown, "move"),
-		rollback: first(actRollback, "roll back"),
+		rollback:    first(actRollback, "roll back"),
+		applyReview: first(actUpdate, "update included"), include: first(actToggle, "include/leave out"),
+		reviewed: first(actOpen, "details"), leave: first(actClose, "back"),
 	}
 }
 
@@ -98,6 +100,8 @@ func (m *model) keyMap() keyMap {
 	case screenList:
 	case screenOutput:
 		return keyMap{short: []key.Binding{h.cont, h.scroll}}
+	case screenReview:
+		return keyMap{short: []key.Binding{h.applyReview, h.include, h.reviewed, h.up, h.down, h.leave}}
 	case screenDetail:
 		d := m.detail
 		if d.versions != nil {
@@ -116,6 +120,8 @@ func (m *model) keyMap() keyMap {
 				return keyMap{short: []key.Binding{h.update, other, h.toggle, h.version, h.remove, h.rollback, h.home, h.scroll, h.back}}
 			}
 			return keyMap{short: []key.Binding{other, h.toggle, h.update, h.version, h.remove, h.rollback, h.home, h.logs, h.scroll, h.back}}
+		case d.change != nil && d.review != nil:
+			return keyMap{short: []key.Binding{h.back, other, h.home, h.scroll}}
 		case d.change != nil:
 			return keyMap{short: []key.Binding{m.applyKey(d), other, h.home, h.scroll, h.back}}
 		default:

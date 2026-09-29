@@ -452,16 +452,24 @@ func (c *cli) outdatedCmd() *cobra.Command {
 }
 
 func (c *cli) updateCmd() *cobra.Command {
-	var yes bool
+	var (
+		yes, dryRun bool
+		exclude     []string
+	)
 	cmd := &cobra.Command{
 		Use:   "update [plugin-id...]",
 		Short: "Update GitHub plugins by reinstalling them",
 		Long: "Update the given plugins, or every plugin with an update. herdr has no update\n" +
-			"command, so each plugin is reinstalled at its new target; the new manifest is\n" +
-			"shown first because its build commands run again. A disabled plugin stays\n" +
-			"disabled, which needs a running herdr server; without one it is not updated.\n" +
-			"Each update reports the plugin's state after it. Plugins whose check succeeded\n" +
-			"are still updated when others fail; the command then exits with an error.",
+			"command, so each plugin is reinstalled at its new target. The updates are\n" +
+			"listed first, then each is shown in full: what changes, its release notes or\n" +
+			"commits, and the new manifest, whose build commands run again. Right before\n" +
+			"each install its ref is checked against the commit shown, and herdr's record\n" +
+			"after it; herdr fetches the ref itself, so a push in between is found only\n" +
+			"after the build commands ran, and is reported.\n\n" +
+			"A disabled plugin stays disabled, which needs a running herdr server; without\n" +
+			"one it is not updated. Each update reports the plugin's state after it.\n" +
+			"Plugins whose check succeeded are still updated when others fail; the command\n" +
+			"then exits with an error.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			plugins, err := c.m.Installed(ctx)
@@ -472,18 +480,11 @@ func (c *cli) updateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			checked := c.m.CheckAll(ctx, selected)
-			var pending []manager.Checked
-			for _, ch := range checked {
-				switch {
-				case ch.Err != nil:
-					fmt.Fprintf(c.errOut, "check failed: %v\n", ch.Err)
-				case ch.Result.Kind == updates.Available:
-					pending = append(pending, ch)
-				case len(args) > 0:
-					fmt.Fprintf(c.out, "%s: %s\n", ch.Plugin.PluginID, ch.Result.Describe())
-				}
+			if _, err := selectPlugins(plugins, exclude); err != nil {
+				return fmt.Errorf("--exclude: %w", err)
 			}
+			checked := c.m.CheckAll(ctx, selected)
+			pending := c.pending(checked, len(args) > 0, exclude)
 			checkErr := checkError(checked)
 			if len(pending) == 0 {
 				if checkErr != nil {
@@ -492,63 +493,144 @@ func (c *cli) updateCmd() *cobra.Command {
 				fmt.Fprintln(c.out, "Nothing to update.")
 				return nil
 			}
-			version := c.m.HerdrVersion(ctx)
-			var failed []string
-			for _, ch := range pending {
-				ok, err := c.updateOne(ctx, ch, version, yes)
-				if err != nil {
-					return err
-				}
-				if !ok {
-					failed = append(failed, ch.Plugin.PluginID)
+			reviews := c.m.ReviewAll(ctx, pending, c.m.HerdrVersion(ctx))
+			c.printPlan(reviews)
+			var blocked []string
+			for _, r := range reviews {
+				c.printReview(r)
+				if !r.Ready() {
+					blocked = append(blocked, r.Checked.Plugin.PluginID)
 				}
 			}
-			if len(failed) > 0 {
-				return errors.Join(checkErr, fmt.Errorf("not updated: %s", strings.Join(failed, ", ")))
+			var blockErr error
+			if len(blocked) > 0 {
+				blockErr = fmt.Errorf("cannot update: %s", strings.Join(blocked, ", "))
 			}
-			return checkErr
+			if dryRun {
+				fmt.Fprintln(c.out, "\nDry run: nothing was changed.")
+				return errors.Join(checkErr, blockErr)
+			}
+			failErr, err := c.applyReviews(ctx, reviews, yes)
+			if err != nil {
+				return err
+			}
+			return errors.Join(checkErr, blockErr, failErr)
 		},
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "update without asking")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show the updates in full without applying them")
+	cmd.Flags().StringSliceVar(&exclude, "exclude", nil, "leave this plugin out; repeat or separate with commas")
 	return cmd
 }
 
-// updateOne previews and applies one update. It reports false for an update
+// pending are the updates the checks found, less those excluded. It reports
+// each failed check, each excluded update and, when the plugins were named,
+// each plugin without an update.
+func (c *cli) pending(checked []manager.Checked, named bool, exclude []string) []manager.Checked {
+	var out []manager.Checked
+	for _, ch := range checked {
+		id := ch.Plugin.PluginID
+		switch {
+		case ch.Err != nil:
+			fmt.Fprintf(c.errOut, "check failed: %v\n", ch.Err)
+		case ch.Result.Kind != updates.Available:
+			if named {
+				fmt.Fprintf(c.out, "%s: %s\n", id, ch.Result.Describe())
+			}
+		case slices.Contains(exclude, id):
+			fmt.Fprintf(c.out, "%s: excluded (%s)\n", id, ch.Result.Describe())
+		default:
+			out = append(out, ch)
+		}
+	}
+	return out
+}
+
+// applyReviews applies the reviewed updates that can run, returning which
+// failed, or an error when the run had to stop.
+func (c *cli) applyReviews(ctx context.Context, reviews []manager.Review, yes bool) (failed, stop error) {
+	var ids []string
+	for _, r := range reviews {
+		if !r.Ready() {
+			continue
+		}
+		ok, err := c.applyReview(ctx, r, yes)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			ids = append(ids, r.Checked.Plugin.PluginID)
+		}
+	}
+	if len(ids) > 0 {
+		return fmt.Errorf("not updated: %s", strings.Join(ids, ", ")), nil
+	}
+	return nil, nil
+}
+
+// printPlan lists the updates about to be reviewed, one line each.
+func (c *cli) printPlan(reviews []manager.Review) {
+	fmt.Fprintf(c.out, "%s:\n", plural(len(reviews), "update"))
+	tw := c.table()
+	for _, r := range reviews {
+		what := r.Checked.Result.Describe()
+		if r.Err == nil {
+			what = r.Explain.Headline
+			if len(r.Explain.Runs) > 0 {
+				what += "; what it runs changes"
+			}
+		}
+		if b := r.Blocker(); b != "" {
+			what = "cannot update: " + b
+		}
+		fmt.Fprintf(tw, "  %s\t%s\n", r.Checked.Plugin.PluginID, safe.Line(what))
+	}
+	_ = tw.Flush()
+}
+
+// printReview shows one update in full.
+func (c *cli) printReview(r manager.Review) {
+	id := r.Checked.Plugin.PluginID
+	fmt.Fprintf(c.out, "\n== %s\n", id)
+	if r.Err != nil {
+		fmt.Fprintf(c.errOut, "%s: %v\n", id, r.Err)
+		return
+	}
+	printSections(c.out, r.Explain.Sections())
+	fmt.Fprintln(c.out)
+	printSections(c.out, r.Preview.Sections())
+	if len(r.Preview.Problems) > 0 {
+		fmt.Fprintf(c.errOut, "skipping %s: see the problems above\n", id)
+	}
+}
+
+// applyReview applies one reviewed update. It reports false for an update
 // that could not be applied, and returns an error only when the whole run
 // must stop, such as a confirmation stdin cannot answer. A declined update
 // counts as handled.
-func (c *cli) updateOne(ctx context.Context, ch manager.Checked, herdrVersion string, yes bool) (bool, error) {
-	id := ch.Plugin.PluginID
-	fmt.Fprintf(c.out, "\n%s: %s\n", id, ch.Result.Describe())
-	preview, err := c.m.PreviewAt(ctx, ch.Result.Source, ch.Result.TargetRef, ch.Result.TargetCommit, herdrVersion, nil)
-	if err != nil {
-		fmt.Fprintf(c.errOut, "%v\n", err)
-		return false, nil
-	}
-	preview.RequireID(id)
-	printSections(c.out, c.m.Explain(ctx, ch.Plugin, preview).Sections())
-	fmt.Fprintln(c.out)
-	printSections(c.out, preview.Sections())
-	if len(preview.Problems) > 0 {
-		fmt.Fprintf(c.errOut, "skipping %s: see the problems above\n", id)
-		return false, nil
-	}
-	if err := c.confirm(yes, "Update "+id+"?"); err != nil {
+func (c *cli) applyReview(ctx context.Context, r manager.Review, yes bool) (bool, error) {
+	id := r.Checked.Plugin.PluginID
+	if err := c.confirm(yes, "\nUpdate "+id+"?"); err != nil {
 		if errors.Is(err, errCancelled) {
 			return true, nil
 		}
 		return false, err
 	}
-	o := c.m.Apply(ctx, manager.Change{
-		Kind: manager.KindUpdate, ID: id, Current: &ch.Plugin,
-		Target: manager.Target{Source: ch.Result.Source, Ref: ch.Result.TargetRef, Commit: ch.Result.TargetCommit},
-	}, c.out)
+	fmt.Fprintf(c.out, "\nUpdating %s\n", id)
+	o := c.m.Apply(ctx, r.Change(), c.out)
 	if err := o.Error(); err != nil {
 		fmt.Fprintf(c.errOut, "%v\n", err)
 		return false, nil
 	}
 	fmt.Fprintln(c.out, o.Summary())
 	return true, nil
+}
+
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 // report prints where a change left the plugin, returning its error when it

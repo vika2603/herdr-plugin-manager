@@ -50,6 +50,13 @@ For the command line alone, download the archive for your platform from the
 Open the popup, or run `hpm` with no arguments for the same interface in the
 terminal. Press `?` for every key; the mouse scrolls, and a click selects,
 then opens. `i` installs from the preview, which shows what the plugin runs.
+`U` reviews every available update before any runs: what each changes, and
+why one cannot run here. `space` leaves an update out, `enter` shows it in
+full, and `u` applies the rest. Right before each install its ref is checked
+against the commit reviewed, and herdr's record after it; herdr fetches the
+ref itself, so a push in between is found only after the build commands ran,
+and is reported.
+
 On an installed plugin, `v` lists its versions to switch to, and reinstalls,
 pins or unpins it; `z` rolls back the last change. The preview of an update
 or another change first says what it is, such as a new release or new
@@ -83,7 +90,7 @@ components.
 | `hpm install <owner/repo>` | preview and install |
 | `hpm uninstall <id>` | uninstall |
 | `hpm enable <id>` / `hpm disable <id>` | enable or disable |
-| `hpm outdated` / `hpm update [id...]` | check for and apply updates; exit with an error if any check fails |
+| `hpm outdated` / `hpm update [id...]` | check for and apply updates; exit with an error if any check fails; `--exclude` leaves plugins out, `--dry-run` only shows them |
 | `hpm rollback <id>` | undo the last change this manager made to a plugin |
 | `hpm history [id]` | changes made to plugins, with herdr's output |
 | `hpm switch <id> <ref>` | install another version: a release, branch or commit |
