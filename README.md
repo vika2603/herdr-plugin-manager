@@ -70,19 +70,22 @@ shows the release notes, or the commit titles when there are none, and what
 changes in what the plugin runs. When GitHub cannot be read, the preview
 says the changes are not known.
 
-While an install, update or uninstall runs, its output shows as herdr prints
-it, and the status line says which update of a review is running and for how
-long. herdr prints what a build command printed only once the command ends
-(herdr 0.9.1). `ctrl+c` cancels it and stays in the manager: herdr and the
-build it runs are interrupted, the updates not yet started are left alone,
-and the output ends with where each plugin stands. An interrupted herdr
-leaves its temporary checkout, a `.tmp-install-*` directory in its plugins
-directory; hpm does not remove it, since herdr offers no way to tell which
-one was this install's. Plugins cannot be enabled or disabled until it ends. After a failure
-or cancellation, `r` previews what did not succeed again before it runs. `H`
+While an install, update or uninstall runs, what herdr prints shows as it
+prints it, and the status line says which update of a review is running and
+for how long. A build command's own output does not show: herdr 0.9.1
+captures it, drops it when the command succeeds and prints only its end when
+the command fails. `ctrl+c` cancels the operation and stays in the manager:
+herdr and the build it runs are interrupted, the updates not yet started are
+left alone, and the output ends with where each plugin stands. An
+interrupted herdr leaves its temporary checkout, a `.tmp-install-*`
+directory in its plugins directory; hpm does not remove it, since herdr
+offers no way to tell which one was this install's. Plugins cannot be
+enabled or disabled until the operation ends. After a failure or
+cancellation, `r` previews what did not succeed again before it runs. `H`
 lists the recorded changes; `enter` shows one with everything herdr printed,
 and `r` retries a change that failed. On the command line, `ctrl+c` stops
 `hpm update` the same way, and the updates left are named for trying again.
+
 An install takes the latest release of a plugin at the root of its
 repository, else the default branch; `v` in the preview chooses another
 version and shows its release notes.
