@@ -314,7 +314,18 @@ func (m *model) installedAction(a action) (tea.Model, tea.Cmd) {
 	case actUpdateAll:
 		list := m.available()
 		if len(list) == 0 {
-			m.setStatus("No updates available", false)
+			failed, unchecked := m.checkGaps()
+			switch {
+			case m.checking:
+				// The status line then shows the check in progress.
+				m.setStatus("", false)
+			case failed > 0:
+				m.setStatus("No updates to apply: "+plural(failed, "check")+" failed", true)
+			case unchecked > 0:
+				m.setStatus("No updates to apply: "+plural(unchecked, "plugin")+" not checked", true)
+			default:
+				m.setStatus("No updates available", false)
+			}
 			return m, nil
 		}
 		if !m.idle() {

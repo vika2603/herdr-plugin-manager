@@ -293,14 +293,28 @@ func (m *model) statusLine() string {
 		case m.checking:
 			return progress("Checking for updates…")
 		}
-		switch n := len(m.available()); n {
+		n := len(m.available())
+		failed, unchecked := m.checkGaps()
+		var summary string
+		switch n {
 		case 0:
-			return " " + t.faint.Render("All GitHub plugins are up to date")
 		case 1:
-			return " " + t.warn.Render(glyphUpdate+" 1 update") + t.faint.Render(m.keyHint(actUpdate, "to review"))
+			summary = t.warn.Render(glyphUpdate+" 1 update") + t.faint.Render(m.keyHint(actUpdate, "to review"))
 		default:
-			return " " + t.warn.Render(fmt.Sprintf("%s %d updates", glyphUpdate, n)) + t.faint.Render(m.keyHint(actUpdateAll, "updates all"))
+			summary = t.warn.Render(fmt.Sprintf("%s %d updates", glyphUpdate, n)) + t.faint.Render(m.keyHint(actUpdateAll, "updates all"))
 		}
+		failure := t.err.Render(glyphFailed + " " + plural(failed, "check") + " failed")
+		switch {
+		case failed > 0 && n > 0:
+			return " " + summary + t.faint.Render(" · ") + failure
+		case failed > 0:
+			return " " + failure + t.faint.Render(m.keyHint(actCheck, "to retry"))
+		case n > 0:
+			return " " + summary
+		case unchecked > 0:
+			return " " + t.faint.Render("Updates not checked"+m.keyHint(actCheck, "to check"))
+		}
+		return " " + t.faint.Render("All GitHub plugins are up to date")
 	}
 	switch {
 	case m.indexLoading:

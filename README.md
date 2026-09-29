@@ -76,7 +76,7 @@ components.
 | `hpm install <owner/repo>` | preview and install |
 | `hpm uninstall <id>` | uninstall |
 | `hpm enable <id>` / `hpm disable <id>` | enable or disable |
-| `hpm outdated` / `hpm update [id...]` | check for and apply updates |
+| `hpm outdated` / `hpm update [id...]` | check for and apply updates; exit with an error if any check fails |
 | `hpm logs <id>` | recent commands herdr ran for a plugin |
 
 The marketplace is not reviewed: read the preview before installing.

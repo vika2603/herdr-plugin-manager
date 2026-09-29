@@ -29,6 +29,7 @@ type fakeBackend struct {
 	mu         sync.Mutex
 	plugins    []herdr.InstalledPluginInfo
 	checks     map[string]updates.Result
+	checkErrs  map[string]error
 	index      *market.Index
 	preview    *manager.Preview
 	installErr error
@@ -118,7 +119,7 @@ func (f *fakeBackend) Update(_ context.Context, p herdr.InstalledPluginInfo, res
 func (f *fakeBackend) CheckAll(_ context.Context, plugins []herdr.InstalledPluginInfo) []manager.Checked {
 	out := make([]manager.Checked, len(plugins))
 	for i, p := range plugins {
-		out[i] = manager.Checked{Plugin: p, Result: f.checks[p.PluginID]}
+		out[i] = manager.Checked{Plugin: p, Result: f.checks[p.PluginID], Err: f.checkErrs[p.PluginID]}
 	}
 	return out
 }
@@ -296,6 +297,98 @@ func TestListShowsPluginsAndUpdates(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("screen lacks %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestStatusLineCountsFailedChecks(t *testing.T) {
+	down := errors.New("could not reach GitHub")
+	for _, tt := range []struct {
+		name      string
+		checkErrs map[string]error
+		upToDate  bool
+		want      string
+	}{
+		{"all fail", map[string]error{"alpha": down, "beta": down}, false, "✕ 2 checks failed · c to retry"},
+		{"one fails", map[string]error{"beta": down}, false, "↑ 1 update · u to review · ✕ 1 check failed"},
+		{"one fails with no update", map[string]error{"beta": down}, true, "✕ 1 check failed · c to retry"},
+		{"none fail", nil, true, "All GitHub plugins are up to date"},
+		{"none fail with an update", nil, false, "↑ 1 update · u to review"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			b := newFake()
+			b.checkErrs = tt.checkErrs
+			if tt.upToDate {
+				b.checks["alpha"] = updates.Result{Kind: updates.UpToDate}
+			}
+			h := start(t, b)
+			if got := strings.TrimSpace(ansi.Strip(h.m.statusLine())); got != tt.want {
+				t.Errorf("status line = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStatusLineNeedsEveryPluginChecked(t *testing.T) {
+	b := newFake()
+	b.checks["alpha"] = updates.Result{Kind: updates.UpToDate}
+	h := start(t, b)
+	delete(h.m.checks, "beta")
+	if got := strings.TrimSpace(ansi.Strip(h.m.statusLine())); got != "Updates not checked · c to check" {
+		t.Errorf("with beta not checked, the status line = %q", got)
+	}
+}
+
+func TestUpdateAllExplainsWhyNothingRuns(t *testing.T) {
+	down := errors.New("could not reach GitHub")
+	for _, tt := range []struct {
+		name  string
+		setup func(*fakeBackend)
+		after func(*model)
+		want  string
+	}{
+		{"all checks fail", func(b *fakeBackend) { b.checkErrs = map[string]error{"alpha": down, "beta": down} }, nil,
+			"✕ No updates to apply: 2 checks failed"},
+		{"a check fails and the rest are up to date", func(b *fakeBackend) { b.checkErrs = map[string]error{"beta": down} }, nil,
+			"✕ No updates to apply: 1 check failed"},
+		{"a plugin is not checked", nil, func(m *model) { delete(m.checks, "beta") },
+			"✕ No updates to apply: 1 plugin not checked"},
+		{"a check is running", nil, func(m *model) { m.checking = true },
+			"Checking for updates…"},
+		{"every check succeeds", nil, nil,
+			"✓ No updates available"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			b := newFake()
+			b.checks["alpha"] = updates.Result{Kind: updates.UpToDate}
+			if tt.setup != nil {
+				tt.setup(b)
+			}
+			h := start(t, b)
+			if tt.after != nil {
+				tt.after(h.m)
+			}
+			h.press("U")
+			if got := ansi.Strip(h.m.statusLine()); !strings.Contains(got, tt.want) {
+				t.Errorf("after U, the status line = %q, want %q", got, tt.want)
+			}
+			if h.m.confirm != nil || len(b.Calls()) != 0 {
+				t.Errorf("U with nothing to update asked %v or ran %q", h.m.confirm, b.Calls())
+			}
+		})
+	}
+}
+
+func TestUpdateAllSkipsFailedChecks(t *testing.T) {
+	b := newFake()
+	b.checkErrs = map[string]error{"beta": errors.New("could not reach GitHub")}
+	h := start(t, b)
+	h.press("U")
+	if h.m.confirm == nil || !strings.Contains(h.m.confirm.prompt, "Update 1 plugins?") {
+		t.Fatalf("U did not ask to update alpha: %+v", h.m.confirm)
+	}
+	h.press("y")
+	if got := b.Calls(); !slices.Contains(got, "update alpha v1.1.0") || slices.ContainsFunc(got, func(c string) bool { return strings.HasPrefix(c, "update beta") }) {
+		t.Errorf("calls = %q, want alpha updated and beta left alone", got)
 	}
 }
 

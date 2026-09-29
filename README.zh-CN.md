@@ -69,7 +69,7 @@ accent = "teal"    # indigo、teal、magenta 或 "#RRGGBB"
 | `hpm install <owner/repo>` | 预览并安装 |
 | `hpm uninstall <id>` | 卸载 |
 | `hpm enable <id>` / `hpm disable <id>` | 启用或禁用 |
-| `hpm outdated` / `hpm update [id...]` | 检查并应用更新 |
+| `hpm outdated` / `hpm update [id...]` | 检查并应用更新；任一检查失败时以错误退出 |
 | `hpm logs <id>` | herdr 最近为插件运行的命令 |
 
 插件市场未经审核，安装前请先看预览。

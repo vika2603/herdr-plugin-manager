@@ -384,7 +384,8 @@ func (c *cli) outdatedCmd() *cobra.Command {
 		Long: "Compare each GitHub-installed plugin with its remote. A plugin installed from a\n" +
 			"release tag is compared with the newest release tag; one installed from a branch\n" +
 			"or the default branch with that branch's current commit; for a plugin in a\n" +
-			"subdirectory, only commits that change the subdirectory count. Commit pins are skipped.",
+			"subdirectory, only commits that change the subdirectory count. Commit pins are skipped.\n" +
+			"Exits with an error when any check fails.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
@@ -408,7 +409,10 @@ func (c *cli) outdatedCmd() *cobra.Command {
 						out[i].Status, out[i].Error = "error", ch.Err.Error()
 					}
 				}
-				return c.writeJSON(out)
+				if err := c.writeJSON(out); err != nil {
+					return err
+				}
+				return checkError(checked)
 			}
 			tw := c.table()
 			fmt.Fprintln(tw, "ID\tSTATUS\tDETAIL")
@@ -424,11 +428,15 @@ func (c *cli) outdatedCmd() *cobra.Command {
 					fmt.Fprintf(tw, "%s\t%s\t%s\n", ch.Plugin.PluginID, ch.Result.Kind, ch.Result.Describe())
 				}
 			}
-			if available == 0 && !all && !hasErrors(checked) {
+			failed := checkError(checked)
+			if available == 0 && !all && failed == nil {
 				fmt.Fprintln(c.out, "All plugins are up to date.")
 				return nil
 			}
-			return tw.Flush()
+			if err := tw.Flush(); err != nil {
+				return err
+			}
+			return failed
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print every result as JSON")
@@ -444,7 +452,8 @@ func (c *cli) updateCmd() *cobra.Command {
 		Long: "Update the given plugins, or every plugin with an update. herdr has no update\n" +
 			"command, so each plugin is reinstalled at its new target; the new manifest is\n" +
 			"shown first because its build commands run again. A disabled plugin stays\n" +
-			"disabled, which needs a running herdr server.",
+			"disabled, which needs a running herdr server. Plugins whose check succeeded\n" +
+			"are still updated when others fail; the command then exits with an error.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			plugins, err := c.m.Installed(ctx)
@@ -455,18 +464,23 @@ func (c *cli) updateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			checked := c.m.CheckAll(ctx, selected)
 			var pending []manager.Checked
-			for _, ch := range c.m.CheckAll(ctx, selected) {
+			for _, ch := range checked {
 				switch {
 				case ch.Err != nil:
-					fmt.Fprintf(c.errOut, "%s: %v\n", ch.Plugin.PluginID, ch.Err)
+					fmt.Fprintf(c.errOut, "check failed: %v\n", ch.Err)
 				case ch.Result.Kind == updates.Available:
 					pending = append(pending, ch)
 				case len(args) > 0:
 					fmt.Fprintf(c.out, "%s: %s\n", ch.Plugin.PluginID, ch.Result.Describe())
 				}
 			}
+			checkErr := checkError(checked)
 			if len(pending) == 0 {
+				if checkErr != nil {
+					return checkErr
+				}
 				fmt.Fprintln(c.out, "Nothing to update.")
 				return nil
 			}
@@ -482,9 +496,9 @@ func (c *cli) updateCmd() *cobra.Command {
 				}
 			}
 			if len(failed) > 0 {
-				return fmt.Errorf("not updated: %s", strings.Join(failed, ", "))
+				return errors.Join(checkErr, fmt.Errorf("not updated: %s", strings.Join(failed, ", ")))
 			}
-			return nil
+			return checkErr
 		},
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "update without asking")
@@ -693,13 +707,19 @@ func selectPlugins(plugins []herdr.InstalledPluginInfo, ids []string) ([]herdr.I
 	return out, nil
 }
 
-func hasErrors(checked []manager.Checked) bool {
+// checkError names the plugins whose update check failed, or is nil when
+// every check succeeded.
+func checkError(checked []manager.Checked) error {
+	var ids []string
 	for _, ch := range checked {
 		if ch.Err != nil {
-			return true
+			ids = append(ids, ch.Plugin.PluginID)
 		}
 	}
-	return false
+	if len(ids) == 0 {
+		return nil
+	}
+	return fmt.Errorf("update check failed: %s", strings.Join(ids, ", "))
 }
 
 func printSections(w io.Writer, sections []manager.Section) {

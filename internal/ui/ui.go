@@ -489,6 +489,24 @@ func (m *model) available() []manager.Checked {
 	return out
 }
 
+// checkGaps counts the GitHub plugins whose last check failed, and those the
+// last check did not cover.
+func (m *model) checkGaps() (failed, unchecked int) {
+	for _, p := range m.installed {
+		if _, github := source.FromInstalled(p); !github {
+			continue
+		}
+		ch, ok := m.checks[p.PluginID]
+		switch {
+		case !ok:
+			unchecked++
+		case ch.Err != nil:
+			failed++
+		}
+	}
+	return failed, unchecked
+}
+
 func (m *model) installedIDs() map[string]bool {
 	ids := make(map[string]bool, len(m.installed))
 	for _, p := range m.installed {
