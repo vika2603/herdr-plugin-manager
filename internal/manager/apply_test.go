@@ -373,3 +373,105 @@ func TestHistoryIsTrimmed(t *testing.T) {
 		t.Fatalf("kept %d entries, %v; want %d", len(list), err, historyKeep)
 	}
 }
+
+func TestApplyRestoresTheEnabledStateAfterAFailureThatRegistered(t *testing.T) {
+	// herdr registered the new version, enabled, and then failed.
+	r := newRegistry(t, true, "", at("v1.0.0", commitV1, false))
+	r.m.Git = releases
+	r.installs(at("v2.0.0", commitV2, true))
+	cli, _ := fakeHerdr(t, `case "$*" in
+"plugin install "*) cp `+r.next+` `+r.file+`; exit 7 ;;
+esac`)
+	r.m.CLI = cli
+	o := update(r)
+	if o.Err == nil {
+		t.Fatal("a failed install succeeded")
+	}
+	if r.plugins()[0].Enabled || o.After == nil || o.After.Enabled || o.After.Commit != commitV2 {
+		t.Errorf("registry enabled %v, after %+v; want it disabled again and reported so", r.plugins()[0].Enabled, o.After)
+	}
+	if !strings.Contains(o.Error().Error(), "o.r: 1.0.0 at v1.0.0 (111111111111), disabled -> 2.0.0 at v2.0.0 (222222222222), disabled") {
+		t.Errorf("the error does not say where the plugin stands: %v", o.Error())
+	}
+	entries, _ := r.m.HistoryEntries()
+	if len(entries) != 1 || entries[0].After == nil || entries[0].After.Enabled {
+		t.Errorf("history = %+v", entries)
+	}
+
+	t.Run("and says when it cannot", func(t *testing.T) {
+		r := newRegistry(t, true, "", at("v1.0.0", commitV1, false))
+		r.server.Fail(herdr.MethodPluginDisable, "internal", "disk full")
+		r.m.Git = releases
+		r.installs(at("v2.0.0", commitV2, true))
+		cli, _ := fakeHerdr(t, `case "$*" in
+"plugin install "*) cp `+r.next+` `+r.file+`; exit 7 ;;
+esac`)
+		r.m.CLI = cli
+		o := update(r)
+		if o.Err == nil || !strings.Contains(o.Error().Error(), "herdr left o.r enabled, and it could not be disabled again") {
+			t.Errorf("err = %v", o.Error())
+		}
+	})
+}
+
+func TestUninstallRecordsWhatIsLeft(t *testing.T) {
+	t.Run("unregistered, then the files failed", func(t *testing.T) {
+		r := newRegistry(t, true, "", at("v1.0.0", commitV1, false))
+		r.m.Git = releases
+		r.installs()
+		cli, _ := fakeHerdr(t, `case "$*" in
+"plugin uninstall "*) cp `+r.next+` `+r.file+`; exit 7 ;;
+esac`)
+		r.m.CLI = cli
+		if err := r.m.Uninstall(context.Background(), "o.r", nil); err == nil || !strings.Contains(err.Error(), "o.r is no longer installed") {
+			t.Fatalf("err = %v, want the failure and that o.r is gone", err)
+		}
+		entries, _ := r.m.HistoryEntries()
+		if len(entries) != 1 || !entries[0].Failed() || entries[0].After != nil || entries[0].AfterUnknown {
+			t.Fatalf("history = %+v, want o.r recorded as removed", entries)
+		}
+		u, err := r.m.PlanRollback(context.Background(), "o.r")
+		if err != nil || u.Remove || u.Target.Commit != commitV1 || *u.Target.Enabled {
+			t.Errorf("undo = %+v, %v; want o.r back at v1.0.0, disabled", u, err)
+		}
+	})
+	t.Run("unreadable afterwards", func(t *testing.T) {
+		r := newRegistry(t, false, "", at("v1.0.0", commitV1, true))
+		cli, _ := fakeHerdr(t, `case "$*" in
+"plugin list --json") if [ -f `+r.next+` ]; then printf '{'; else cat `+r.file+`; fi ;;
+"plugin uninstall "*) touch `+r.next+` ;;
+esac`)
+		r.m.CLI = cli
+		if err := r.m.Uninstall(context.Background(), "o.r", nil); err == nil || !strings.Contains(err.Error(), "not confirmed") {
+			t.Fatalf("err = %v, want the removal unconfirmed", err)
+		}
+		entries, _ := r.m.HistoryEntries()
+		if len(entries) != 1 || !entries[0].AfterUnknown {
+			t.Errorf("history = %+v, want the state unknown", entries)
+		}
+	})
+	t.Run("a rollback that uninstalls is recorded too", func(t *testing.T) {
+		r := newRegistry(t, true, "")
+		r.m.Git = releases
+		r.installs(at("v2.0.0", commitV2, true))
+		if o := r.m.Apply(context.Background(), Change{Kind: KindInstall, ID: "o.r", Target: Target{Source: src, Ref: "v2.0.0", Commit: commitV2}}, nil); o.Err != nil {
+			t.Fatal(o.Error())
+		}
+		u, err := r.m.PlanRollback(context.Background(), "o.r")
+		if err != nil || !u.Remove {
+			t.Fatalf("undo = %+v, %v", u, err)
+		}
+		r.installs()
+		cli, _ := fakeHerdr(t, `case "$*" in
+"plugin uninstall "*) cp `+r.next+` `+r.file+` ;;
+esac`)
+		r.m.CLI = cli
+		if o := r.m.Rollback(context.Background(), u, nil); o.Err != nil || o.After != nil || o.Before == nil {
+			t.Errorf("outcome = %+v", o)
+		}
+		entries, _ := r.m.HistoryEntries()
+		if last := entries[len(entries)-1]; last.Kind != KindRollback || last.After != nil || last.Before == nil {
+			t.Errorf("last entry = %+v", last)
+		}
+	})
+}

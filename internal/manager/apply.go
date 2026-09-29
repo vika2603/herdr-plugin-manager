@@ -291,11 +291,34 @@ func (m *Manager) Apply(ctx context.Context, c Change, out io.Writer) Outcome {
 		o.After = &s
 	}
 	if installErr != nil {
-		o.Err = installErr
+		// herdr may have registered the new version before the command
+		// failed, enabled as every install is; the plugin still goes back to
+		// the state it was to be left in.
+		o.Err = errors.Join(installErr, m.restoreEnabled(readCtx, c.ID, &o, want))
 	} else {
 		o.Err = m.settle(readCtx, c, &o, want, readErr)
 	}
 	return done()
+}
+
+// restoreEnabled leaves the plugin enabled or disabled as wanted when the
+// record shows otherwise, or, when the record is unknown and it is to be
+// disabled, disables it whatever its state. It returns what could not be
+// done.
+func (m *Manager) restoreEnabled(ctx context.Context, id string, o *Outcome, want bool) error {
+	switch {
+	case o.AfterUnknown && !want:
+		if err := m.setEnabledWithin(ctx, id, false); err != nil {
+			return fmt.Errorf("%s could not be disabled again: %w", id, err)
+		}
+	case o.After != nil && o.After.Enabled != want:
+		if err := m.setEnabledWithin(ctx, id, want); err != nil {
+			return fmt.Errorf("herdr left %s %s, and it could not be %s again: %w",
+				id, enabledWord(o.After.Enabled), enabledWord(want), err)
+		}
+		o.After.Enabled = want
+	}
+	return nil
 }
 
 // settle checks what herdr installed against the target and leaves the
@@ -305,28 +328,13 @@ func (m *Manager) settle(ctx context.Context, c Change, o *Outcome, want bool, r
 	switch {
 	case o.AfterUnknown:
 		errs = append(errs, fmt.Errorf("%w: %w", ErrUnconfirmed, readErr))
-		// herdr enables what it installs, so a plugin to be left disabled
-		// is disabled whatever its state.
-		if !want {
-			if err := m.setEnabledWithin(ctx, c.ID, false); err != nil {
-				errs = append(errs, fmt.Errorf("%s could not be disabled again: %w", c.ID, err))
-			}
-		}
 	case o.After == nil:
 		errs = append(errs, fmt.Errorf("herdr reported success, but no plugin %s is installed; the manifest may declare another id", c.ID))
 	case o.After.Commit != c.Target.Commit:
 		errs = append(errs, fmt.Errorf("herdr installed %s at %.12s, not the previewed %.12s; review the plugin before using it",
 			c.Target.Source, o.After.Commit, c.Target.Commit))
 	}
-	if o.After != nil && o.After.Enabled != want {
-		if err := m.setEnabledWithin(ctx, c.ID, want); err != nil {
-			errs = append(errs, fmt.Errorf("herdr left %s %s, and it could not be %s again: %w",
-				c.ID, enabledWord(o.After.Enabled), enabledWord(want), err))
-		} else {
-			o.After.Enabled = want
-		}
-	}
-	return errors.Join(errs...)
+	return errors.Join(append(errs, m.restoreEnabled(ctx, c.ID, o, want))...)
 }
 
 func (m *Manager) setEnabledWithin(ctx context.Context, id string, enabled bool) error {
@@ -403,25 +411,53 @@ func targetLabel(t *TargetRecord) string {
 
 // Uninstall removes a plugin: a GitHub install loses its managed checkout, a
 // linked plugin is only unregistered and its directory is left alone. The
-// change is recorded in the history.
+// change is recorded in the history. A failure says where the plugin stands.
 func (m *Manager) Uninstall(ctx context.Context, id string, out io.Writer) error {
+	return m.uninstall(ctx, KindUninstall, id, out).Error()
+}
+
+// uninstall removes plugin id and reads the plugin list again, since herdr
+// unregisters a plugin before it removes its files and can fail between the
+// two. What the list shows afterwards is recorded, or that it is unknown.
+func (m *Manager) uninstall(ctx context.Context, kind ChangeKind, id string, out io.Writer) Outcome {
+	o := Outcome{Kind: kind, ID: id}
 	if id == m.SelfID {
-		return ErrSelf
+		o.Err = ErrSelf
+		return o
 	}
-	o := Outcome{Kind: KindUninstall, ID: id}
+	if out == nil {
+		out = io.Discard
+	}
 	if current, err := m.find(ctx, id); err == nil && current != nil {
 		s := StateOf(*current)
 		o.Before = &s
 	}
 	err := m.CLI.Uninstall(ctx, id, out)
-	entry := Entry{Kind: KindUninstall, Plugin: id, Before: o.Before}
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), afterTimeout)
+	defer cancel()
+	after, readErr := m.find(readCtx, id)
+	switch {
+	case readErr != nil:
+		o.AfterUnknown = true
+		err = errors.Join(err, fmt.Errorf("the plugin list could not be read afterwards, so the removal is not confirmed: %w", readErr))
+	case after != nil:
+		s := StateOf(*after)
+		o.After = &s
+		if err == nil {
+			err = fmt.Errorf("herdr reported success, but %s is still installed", id)
+		}
+	}
+	o.Err = err
+	entry := Entry{Kind: kind, Plugin: id, Before: o.Before, After: o.After, AfterUnknown: o.AfterUnknown}
 	if err != nil {
-		entry.After, entry.Error = o.Before, err.Error()
+		entry.Error = err.Error()
 	}
-	if herr := m.History.add(&entry); herr != nil && out != nil {
+	if herr := m.History.add(&entry); herr != nil {
 		fmt.Fprintf(out, "warning: could not record the change in the history: %v\n", herr)
+	} else if m.History != nil && m.History.Dir != "" {
+		o.Entry = entry.ID
 	}
-	return err
+	return o
 }
 
 // Undo is the change that takes a plugin back to where it was before the
@@ -505,13 +541,7 @@ func (m *Manager) Rollback(ctx context.Context, u Undo, out io.Writer) Outcome {
 	if !u.Remove {
 		return m.Apply(ctx, Change{Kind: KindRollback, ID: u.Entry.Plugin, Current: u.Current, Target: u.Target}, out)
 	}
-	o := Outcome{Kind: KindRollback, ID: u.Entry.Plugin, After: u.Entry.After, Before: u.Entry.After}
-	if err := m.Uninstall(ctx, u.Entry.Plugin, out); err != nil {
-		o.Err = err
-		return o
-	}
-	o.After = nil
-	return o
+	return m.uninstall(ctx, KindRollback, u.Entry.Plugin, out)
 }
 
 // HistoryEntries lists the recorded changes, the oldest first.
