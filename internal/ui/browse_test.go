@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -252,5 +253,52 @@ func TestMarketplaceTellsAnotherInstallOfTheSameID(t *testing.T) {
 				t.Errorf("want %q and %q:\n%s", tt.mark, tt.status, out)
 			}
 		})
+	}
+}
+
+// shownOrders presses the sort key n times on the marketplace and returns
+// the order the count line names each time, starting with the one before.
+func shownOrders(h *harness, n int) []string {
+	name := func() string {
+		_, after, ok := strings.Cut(h.words(), "· by ")
+		if !ok {
+			return ""
+		}
+		return strings.Fields(after)[0]
+	}
+	out := []string{name()}
+	for range n {
+		h.press("s")
+		out = append(out, name())
+	}
+	return out
+}
+
+func TestSortChangesTheOrderOnEveryPress(t *testing.T) {
+	h := start(t, newFake())
+	h.press("tab")
+	got := shownOrders(h, 5)
+	want := []string{"popular", "trending", "recent", "newest", "name", "popular"}
+	if !slices.Equal(got, want) {
+		t.Errorf("without a search, sort shows %q, want %q", got, want)
+	}
+}
+
+func TestSortKeepsRelevanceForASearch(t *testing.T) {
+	h := start(t, newFake())
+	h.press("tab", "/", "g", "a", "tab")
+	got := shownOrders(h, 6)
+	want := []string{"relevance", "popular", "trending", "recent", "newest", "name", "relevance"}
+	if !slices.Equal(got, want) {
+		t.Errorf("with a search, sort shows %q, want %q", got, want)
+	}
+	// Cleared, the search leaves relevance, shown as popular; the next
+	// press moves on from popular.
+	h.press("/", "esc")
+	if v := h.m.filters[tabBrowse].Value(); v != "" {
+		t.Fatalf("the search was not cleared: %q", v)
+	}
+	if got := shownOrders(h, 1); !slices.Equal(got, []string{"popular", "trending"}) {
+		t.Errorf("after clearing the search, sort shows %q, want popular then trending", got)
 	}
 }

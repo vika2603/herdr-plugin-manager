@@ -414,7 +414,7 @@ func (m *model) browseAction(a action) (tea.Model, tea.Cmd) {
 		m.setStatus("", false)
 		return m, m.withSpinner(m.loadIndex(true))
 	case actSort:
-		m.order = m.order.Next()
+		m.order = m.nextOrder()
 		m.sortEntries()
 		m.cursor[tabBrowse], m.offset[tabBrowse] = 0, 0
 		return m, nil

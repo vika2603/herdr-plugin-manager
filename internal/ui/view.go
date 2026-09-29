@@ -347,10 +347,7 @@ func (m *model) viewList() string {
 	if m.tab == tabInstalled {
 		count = counted(len(m.visibleInstalled()), len(m.installed), "plugin")
 	} else {
-		order := m.order.String()
-		if m.order == market.ByRelevance && m.filters[tabBrowse].Value() == "" {
-			order = market.ByPopular.String()
-		}
+		order := m.shownOrder().String()
 		count = counted(len(m.visibleEntries()), len(m.entries), "plugin")
 		if m.filters[tabBrowse].Value() != "" {
 			count = fmt.Sprintf("%d of %d match", len(m.visibleEntries()), len(m.entries))

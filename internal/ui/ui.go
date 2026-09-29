@@ -632,6 +632,25 @@ func (m *model) typedSource() (source.GitHub, bool) {
 	return src, err == nil
 }
 
+// shownOrder is the order the marketplace list is in: without search terms,
+// relevance sorts by popularity.
+func (m *model) shownOrder() market.Order {
+	if m.order == market.ByRelevance && len(market.Terms(m.filters[tabBrowse].Value())) == 0 {
+		return market.ByPopular
+	}
+	return m.order
+}
+
+// nextOrder is the order after the one shown. Without search terms,
+// relevance would sort as popular again, so it is passed over.
+func (m *model) nextOrder() market.Order {
+	next := m.shownOrder().Next()
+	if next == market.ByRelevance && len(market.Terms(m.filters[tabBrowse].Value())) == 0 {
+		next = next.Next()
+	}
+	return next
+}
+
 // sortEntries orders the marketplace list by the current order.
 func (m *model) sortEntries() {
 	market.Sort(m.entries, m.order)
