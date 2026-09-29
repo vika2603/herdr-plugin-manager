@@ -124,6 +124,8 @@ func (m *model) result(msg tea.Msg) (tea.Cmd, bool) {
 		return m.onOpDone(msg), true
 	case historyMsg:
 		onHistory(msg)
+	case usageMsg:
+		msg.d.usage = &msg.usage
 	default:
 		return nil, false
 	}
@@ -137,7 +139,15 @@ func (m *model) onInstalled(msg installedMsg) tea.Cmd {
 	if msg.err != nil || len(msg.plugins) == 0 {
 		return nil
 	}
-	return m.withSpinner(m.checkUpdates())
+	var show tea.Cmd
+	if id := m.showAfterLoad; id != "" {
+		m.showAfterLoad = ""
+		if p, ok := m.installedByID(id); ok && m.screen == screenList {
+			m.tab = tabInstalled
+			show = m.openInstalled(p)
+		}
+	}
+	return tea.Batch(show, m.withSpinner(m.checkUpdates()))
 }
 
 func (m *model) onIndex(msg indexMsg) {
@@ -573,7 +583,7 @@ func (m *model) idle() bool {
 func (m *model) openInstalled(p herdr.InstalledPluginInfo) tea.Cmd {
 	d := &detail{crumb: tabNames[tabInstalled], title: p.Name, plugin: &p}
 	m.detail, m.screen = d, screenDetail
-	return tea.Batch(m.loadLogs(p.PluginID), m.loadInstalledReadme(d, p))
+	return tea.Batch(m.loadLogs(p.PluginID), m.loadInstalledReadme(d, p), m.loadUsage(d, p))
 }
 
 func (m *model) openInstall(e market.Entry) tea.Cmd {

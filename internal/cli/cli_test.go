@@ -47,6 +47,8 @@ type harness struct {
 	// afterInstallFile, once written, replaces the plugin list when herdr
 	// installs a plugin.
 	afterInstallFile string
+	// herdrConfig is herdr's config file.
+	herdrConfig string
 	// blockFile lists the sources whose install waits until herdr is
 	// interrupted.
 	blockFile string
@@ -65,9 +67,12 @@ func newHarness(t *testing.T) *harness {
 	h.listFile = filepath.Join(dir, "list.json")
 	h.afterInstallFile = filepath.Join(dir, "after-install.json")
 	h.blockFile = filepath.Join(dir, "block")
+	h.herdrConfig = filepath.Join(dir, "herdr-config.toml")
+	t.Setenv("HERDR_CONFIG_PATH", h.herdrConfig)
 	h.setInstalled(noneYet)
 	script := "#!/bin/sh\necho \"$*\" >> " + callsFile + "\ncase \"$*\" in\n" +
 		"--version) echo 'herdr 0.9.1' ;;\n" +
+		"'plugin config-dir '*) echo /cfg/$3 ;;\n" +
 		"'plugin list --json') cat " + h.listFile + " ;;\n" +
 		"'plugin install '*) if [ -f " + h.blockFile + " ] && grep -qx \"$3\" " + h.blockFile + "; then exec sleep 30; fi\n" +
 		"  if [ -f " + h.afterInstallFile + " ]; then cp " + h.afterInstallFile + " " + h.listFile + "; fi ;;\nesac\n"
@@ -654,5 +659,35 @@ func TestCancellingAnUpdateOfARun(t *testing.T) {
 				t.Errorf("history does not record the cancelled update (%v):\n%s", err, out)
 			}
 		})
+	}
+}
+
+func TestInstallSaysHowToUseThePlugin(t *testing.T) {
+	h := newHarness(t)
+	h.installs(strings.Replace(gadgetAt(""), `"enabled":true,`,
+		`"enabled":true,"actions":[{"id":"open","title":"Open gadget","command":["sh","open.sh"]}],`, 1))
+	if err := os.WriteFile(h.herdrConfig, []byte("[[keys.command]]\nkey = \"prefix+g\"\ntype = \"plugin_action\"\ncommand = \"other.open\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err := h.run("", false, "install", "carol.gadget", "--yes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	use := strings.Index(out, "\nUse\n")
+	if use < 0 {
+		t.Fatalf("the install does not say how to use the plugin:\n%s", out)
+	}
+	for _, want := range []string{
+		"config directory: /cfg/carol.gadget",
+		"action open: Open gadget, run as carol.gadget.open",
+		"Bind a key (in " + h.herdrConfig + ", then herdr server reload-config)",
+		`command = "carol.gadget.open"`,
+	} {
+		if !strings.Contains(out[use:], want) {
+			t.Errorf("the usage does not say %q:\n%s", want, out[use:])
+		}
+	}
+	if info, _, _ := h.run("", false, "info", "carol.gadget"); !strings.Contains(info, "run as carol.gadget.open") {
+		t.Errorf("info does not say how to use the plugin:\n%s", info)
 	}
 }

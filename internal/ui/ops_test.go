@@ -347,3 +347,28 @@ func TestLiveOutputAddsLinesAsTheyEndAndWrapsLongOnes(t *testing.T) {
 		t.Errorf("the output is not wrapped again for the new width:\n%s", out)
 	}
 }
+
+func TestInstallOpensThePluginSayingHowToUseIt(t *testing.T) {
+	b := newFake()
+	gadget := plugin("carol.gadget", true)
+	gadget.Name = "Gadget"
+	gadget.Actions = herdr.Some([]herdr.PluginManifestAction{{ID: "go", Title: "Go"}, {ID: "stop", Title: "Stop"}})
+	b.bound = map[string][]string{"carol.gadget.stop": {"prefix+s"}}
+	b.installHook = func(context.Context) { b.plugins = append(slices.Clone(b.plugins), gadget) }
+	h := start(t, b)
+	h.press("tab", "enter", "i")
+	out := h.words()
+	if h.m.screen != screenDetail || h.m.detail.plugin == nil || h.m.detail.plugin.PluginID != "carol.gadget" {
+		t.Fatalf("the installed plugin's details did not open:\n%s", out)
+	}
+	for _, want := range []string{
+		"USE", "CONFIG /config/carol.gadget",
+		"carol.gadget.go · no key bound", "carol.gadget.stop · prefix+s",
+		"BIND A KEY in /herdr/config.toml, then herdr server reload-config",
+		`command = "carol.gadget.go"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the details do not say %q:\n%s", want, out)
+		}
+	}
+}

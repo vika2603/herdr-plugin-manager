@@ -53,6 +53,8 @@ type fakeBackend struct {
 	// what Logs does.
 	history []manager.Entry
 	logs    []herdr.PluginCommandLogInfo
+	// bound are the keys Usage reports bound, by action command.
+	bound map[string][]string
 }
 
 func (f *fakeBackend) record(format string, args ...any) {
@@ -178,6 +180,16 @@ func (*fakeBackend) InstalledReadme(p herdr.InstalledPluginInfo) (*manager.Readm
 func (f *fakeBackend) OpenURL(_ context.Context, url string) error {
 	f.record("open %s", url)
 	return nil
+}
+
+func (f *fakeBackend) Usage(_ context.Context, p herdr.InstalledPluginInfo) manager.Usage {
+	u := manager.Usage{ConfigDir: "/config/" + p.PluginID, HerdrConfig: "/herdr/config.toml"}
+	for _, a := range p.Actions.ValueOrZero() {
+		ua := manager.UsageAction{ID: a.ID, Title: a.Title, Command: p.PluginID + "." + a.ID}
+		ua.Keys = f.bound[ua.Command]
+		u.Actions = append(u.Actions, ua)
+	}
+	return u
 }
 
 func (f *fakeBackend) HistoryEntries() ([]manager.Entry, error) {

@@ -866,7 +866,49 @@ func (m *model) installedDetail(d *detail) []string {
 		out = append(out, "")
 		out = append(out, m.section("Entrypoints", "", t.faint, t.text, entry)...)
 	}
+	out = append(out, m.usageLines(d)...)
 	return append(out, m.logLines(d)...)
+}
+
+// usageLines say how the plugin is used: its config directory, the command
+// each action runs by and the keys bound to it, and a binding to add for an
+// action no key runs.
+func (m *model) usageLines(d *detail) []string {
+	t := m.theme
+	out := []string{"", m.heading("Use", "", t.faint)}
+	u := d.usage
+	if u == nil {
+		return append(out, subIndent+t.faint.Render("reading…"))
+	}
+	config := t.fg2.Render(u.ConfigDir)
+	if u.ConfigErr != nil {
+		config = t.err.Render("not known: " + safe.Line(u.ConfigErr.Error()))
+	}
+	rows := []field{{"config", config}}
+	var unbound *manager.UsageAction
+	for i, a := range u.Actions {
+		keys := t.faint.Render("no key bound")
+		if len(a.Keys) > 0 {
+			keys = t.ok.Render(strings.Join(a.Keys, ", "))
+		} else if unbound == nil {
+			unbound = &u.Actions[i]
+		}
+		rows = append(rows, field{"action", t.text.Render(safe.Line(a.Command)) + t.faint.Render(" · ") + keys})
+	}
+	if len(u.Actions) == 0 {
+		rows = append(rows, field{"action", t.faint.Render("none, so no key can run it")})
+	}
+	if u.KeysErr != nil {
+		rows = append(rows, field{"keys", t.err.Render("not known: " + safe.Line(u.KeysErr.Error()))})
+	}
+	out = append(out, m.fields(rows)...)
+	if unbound != nil {
+		out = append(out, "", m.heading("Bind a key", "in "+u.HerdrConfig+", then herdr server reload-config", t.faint))
+		for _, l := range unbound.Snippet() {
+			out = append(out, subIndent+t.fg2.Render(safe.Line(l)))
+		}
+	}
+	return out
 }
 
 // logLines are the commands herdr ran for the plugin, the newest first.

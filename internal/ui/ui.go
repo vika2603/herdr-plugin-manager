@@ -49,6 +49,7 @@ type Backend interface {
 	InstalledReadme(p herdr.InstalledPluginInfo) (*manager.Readme, error)
 	OpenURL(ctx context.Context, url string) error
 	HistoryEntries() ([]manager.Entry, error)
+	Usage(ctx context.Context, p herdr.InstalledPluginInfo) manager.Usage
 }
 
 // Options adjust the program to where it runs.
@@ -184,6 +185,9 @@ type model struct {
 	outputLines  outputCache
 	// history is open while the recorded changes are listed.
 	history *historyView
+	// showAfterLoad is the plugin whose details open when the list is next
+	// loaded.
+	showAfterLoad string
 
 	status    string
 	statusErr bool
@@ -201,6 +205,8 @@ type detail struct {
 	plugin  *herdr.InstalledPluginInfo
 	logs    []herdr.PluginCommandLogInfo
 	logsErr error
+	// usage says how an installed plugin is used, once it is read.
+	usage *manager.Usage
 
 	loading bool
 	preview *manager.Preview
@@ -390,6 +396,10 @@ type (
 		enabled bool
 		err     error
 	}
+	usageMsg struct {
+		d     *detail
+		usage manager.Usage
+	}
 	explainMsg struct {
 		d       *detail
 		explain manager.Explanation
@@ -434,6 +444,10 @@ func (m *model) checkUpdates() tea.Cmd {
 	m.checkGen++
 	gen := m.checkGen
 	return func() tea.Msg { return checksMsg{gen: gen, results: m.b.CheckAll(m.ctx, plugins)} }
+}
+
+func (m *model) loadUsage(d *detail, p herdr.InstalledPluginInfo) tea.Cmd {
+	return func() tea.Msg { return usageMsg{d: d, usage: m.b.Usage(m.ctx, p)} }
 }
 
 func (m *model) loadLogs(id string) tea.Cmd {

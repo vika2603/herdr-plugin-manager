@@ -77,6 +77,9 @@ type opResult struct {
 	done  string
 	err   error
 	retry func() tea.Cmd
+	// show is the plugin whose details open once the list is reloaded,
+	// which say how to use a plugin just installed.
+	show string
 }
 
 type opDoneMsg struct {
@@ -144,6 +147,7 @@ func (m *model) onOpDone(msg opDoneMsg) tea.Cmd {
 		if watching || m.screen == screenDetail || m.screen == screenReview {
 			m.screen, m.detail = screenList, nil
 		}
+		m.showAfterLoad = r.show
 	}
 	return m.loadInstalled()
 }
@@ -184,7 +188,7 @@ func (m *model) install(t installTarget, id string, existing *herdr.InstalledPlu
 			Kind: manager.KindInstall, ID: id, Current: existing,
 			Target: manager.Target{Source: t.src, Ref: t.ref, Commit: t.commit},
 		}, op)
-		return opResult{done: o.Summary(), err: o.Error(), retry: func() tea.Cmd { return m.openInstallAt(t.src, t.ref) }}
+		return opResult{done: o.Summary(), err: o.Error(), retry: func() tea.Cmd { return m.openInstallAt(t.src, t.ref) }, show: id}
 	})
 }
 

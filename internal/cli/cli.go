@@ -280,7 +280,7 @@ func (c *cli) printInstalled(ctx context.Context, p herdr.InstalledPluginInfo) {
 		}
 		sections = append(sections, manager.Section{Title: "Update", Lines: []string{line, "updates: " + safe.Line(manager.TrackingOf(p).Describe())}})
 	}
-	printSections(c.out, sections)
+	printSections(c.out, append(sections, c.m.Usage(ctx, p).Sections()...))
 }
 
 func (c *cli) installCmd() *cobra.Command {
@@ -293,7 +293,9 @@ func (c *cli) installCmd() *cobra.Command {
 		Short: "Preview and install a plugin from GitHub",
 		Long: "Install a marketplace plugin by id, or any GitHub plugin by its\n" +
 			"owner/repo[/subdir] source. The manifest is shown first: its build commands\n" +
-			"run during install and its startup commands in every herdr session.",
+			"run during install and its startup commands in every herdr session. Once\n" +
+			"installed, its config directory and actions are listed, with a key binding\n" +
+			"for herdr's config.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -320,7 +322,14 @@ func (c *cli) installCmd() *cobra.Command {
 				Kind: manager.KindInstall, ID: preview.Manifest.ID, Current: preview.Existing,
 				Target: manager.Target{Source: src, Ref: preview.Ref, Commit: preview.Commit},
 			}, c.out)
-			return c.report(o)
+			if err := c.report(o); err != nil {
+				return err
+			}
+			if p, err := c.m.Find(ctx, preview.Manifest.ID); err == nil && p != nil {
+				fmt.Fprintln(c.out)
+				printSections(c.out, c.m.Usage(ctx, *p).Sections())
+			}
+			return nil
 		},
 	}
 	cmd.Flags().StringVar(&ref, "ref", "", "branch, tag or commit to install (default: the latest release of a plugin at the repository root, else the default branch)")
