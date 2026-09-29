@@ -48,8 +48,8 @@ stay distinct.
 | Component | Drawn as |
 | --- | --- |
 | Tab row | names with counts, the active one bold in the accent over a thick accent underline |
-| List item | two lines and a gap: name, version in `fg3`, marks; then the description in `fg2`. The selected item has `▌` in column 2, a bold name and an accent-tinted description. A marketplace item's description comes before the repository's language and last push in `fg3`, which are marked `repo` for a plugin in a subdirectory and dropped when there is no room |
-| Listing | on a screen 110 columns wide or more, the selected marketplace plugin's field rows beside the list, after a `│` in `rule` |
+| List item | two lines and a gap: name, version in `fg3`, marks; then the description in `fg2`. The selected item has `▌` in column 2, a bold name and an accent-tinted description. A marketplace item's marks always fit: the stars go first, then the version and the name are cut short. Its description comes before the language and last push in `fg3`, which show only when the whole description fits beside them; a plugin in a subdirectory shows no language, and its push is called the repository's |
+| Listing | on a screen 110 columns wide or more, the selected marketplace plugin beside the list, after a `│` in `rule`: the plugin's own field rows, then a Repository section of GitHub's figures, one per row. A listing taller than the screen ends with a line saying enter shows the rest |
 | Mark | glyph and word in its role's colour: `● enabled` `○ disabled` `↑ v1.1.0` `◆ local` `✓ installed` `✕ check failed` `▲ 2 warnings` `◇ pre-release` |
 | Title line | bold name, then `version · id` in `fg3`, then a mark |
 | Field rows | upper-case labels in `fg3` in one column as wide as the longest, values after two spaces, wrapped values aligned under the value column |

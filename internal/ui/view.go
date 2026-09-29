@@ -680,8 +680,11 @@ func (m *model) entryLines(e *market.Entry) []string {
 		out = append(out, wrapIndented(indent+t.fg2.Render(mf.Description), m.w()-1)...)
 	}
 	out = append(out, "")
-	out = append(out, m.fields(m.entryFields(*e))...)
+	out = append(out, m.fields(append(m.entryFields(*e),
+		field{"source", t.text.Render(e.Source.String())}, field{"link", t.fg2.Render(e.Source.WebURL())}))...)
 	out = append(out, m.problems(problems)...)
+	out = append(out, "", m.heading("Repository", repoNote(*e), t.faint))
+	out = append(out, m.fields(m.repoFields(*e, false))...)
 	return append(out, "", indent+t.faint.Render("Reading what it runs from the manifest…"))
 }
 
@@ -693,8 +696,13 @@ func (m *model) previewLines(p *manager.Preview, change bool, e *market.Entry) [
 	t := m.theme
 	mf := p.Manifest
 	out := []string{m.titleLine(safe.Line(mf.Name), safe.Line(mf.Version), safe.Line(mf.ID))}
-	if mf.Description != "" {
-		out = append(out, wrapIndented(indent+t.fg2.Render(safe.Line(mf.Description)), m.w()-1)...)
+	desc := mf.Description
+	if desc == "" && e != nil {
+		// The listing fell back to the repository's description.
+		desc = e.Description()
+	}
+	if desc != "" {
+		out = append(out, wrapIndented(indent+t.fg2.Render(safe.Line(desc)), m.w()-1)...)
 	}
 	out = append(out, "")
 
@@ -730,12 +738,16 @@ func (m *model) previewLines(p *manager.Preview, change bool, e *market.Entry) [
 	rows = append(rows, field{"updates", t.fg2.Render(safe.Line(manager.TrackingAt(p.Ref, p.Commit).Describe()))})
 	if e != nil {
 		for _, f := range m.entryFields(*e) {
-			if f.label == "topics" || f.label == "repository" {
+			if f.label == "topics" {
 				rows = append(rows, f)
 			}
 		}
 	}
 	out = append(out, m.fields(rows)...)
+	if e != nil {
+		out = append(out, "", m.heading("Repository", repoNote(*e), t.faint))
+		out = append(out, m.fields(m.repoFields(*e, false))...)
+	}
 	out = append(out, m.problems(p.Problems)...)
 	if len(p.Warnings) > 0 {
 		out = append(out, "")

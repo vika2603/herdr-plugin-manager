@@ -644,14 +644,6 @@ func (m *model) checkGaps() (failed, unchecked int) {
 	return failed, unchecked
 }
 
-func (m *model) installedIDs() map[string]bool {
-	ids := make(map[string]bool, len(m.installed))
-	for _, p := range m.installed {
-		ids[p.PluginID] = true
-	}
-	return ids
-}
-
 // visibleInstalled and visibleEntries apply the tab's filter.
 func (m *model) visibleInstalled() []herdr.InstalledPluginInfo {
 	query := m.filters[tabInstalled].Value()

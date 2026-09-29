@@ -91,12 +91,14 @@ components.
 | `hpm reinstall <id>` | reinstall the installed version |
 | `hpm logs <id>` | recent commands herdr ran for a plugin |
 
-The marketplace lists what each plugin is for, its stars, the repository's
-language and last push, and whether it is installed or cannot run here. On
-a screen 110 columns wide or more, the selected plugin's platforms, minimum
-herdr version, topics, source and version show beside the list. The
-language, stars and dates are the repository's, which for a plugin in a
-subdirectory holds more than that plugin.
+The marketplace lists what each plugin is for, its stars and last push, and
+whether it is installed, installed from another source or linked locally
+under the same id, or cannot run here. On a screen 110 columns wide or more,
+the selected plugin's platforms, minimum herdr version, version and topics
+show beside the list, then its repository's stars, language and last push.
+Those are GitHub's figures for the whole repository, which for a plugin in a
+subdirectory holds more than that plugin, so the list gives such a plugin
+no language.
 
 The marketplace is not reviewed: read the preview before installing.
 
