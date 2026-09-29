@@ -168,7 +168,7 @@ func (o Outcome) Changed() bool {
 func (o Outcome) Summary() string {
 	switch {
 	case o.AfterUnknown:
-		return o.ID + ": its state is unknown; the plugin list could not be read afterwards"
+		return o.ID + ": its state is unknown, since the plugin list could not be read afterwards; check it with hpm info " + o.ID + " or reload the list"
 	case o.Before == nil && o.After == nil:
 		return o.ID + " is not installed"
 	case o.After == nil:
@@ -203,6 +203,10 @@ func (e *OutcomeError) Unwrap() error { return e.Outcome.Err }
 // plugin enabled: herdr registers every plugin it installs as enabled, and
 // only a running server can disable it again.
 var ErrKeepDisabled = errors.New("keeping the plugin disabled needs a running herdr server, since herdr enables every plugin it installs")
+
+// ErrUnconfirmed is returned for a change herdr reported done whose result
+// could not be read back, so what is installed is not known.
+var ErrUnconfirmed = errors.New("herdr reported success, but the plugin list could not be read afterwards, so the change is not confirmed")
 
 // afterTimeout bounds reading the plugin list after a change, which runs
 // even when the change was cancelled.
@@ -279,8 +283,8 @@ func (m *Manager) Apply(ctx context.Context, c Change, out io.Writer) Outcome {
 	// plugin stands.
 	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), afterTimeout)
 	defer cancel()
-	after, err := m.find(readCtx, c.ID)
-	if err != nil {
+	after, readErr := m.find(readCtx, c.ID)
+	if readErr != nil {
 		o.AfterUnknown = true
 	} else if after != nil {
 		s := StateOf(*after)
@@ -288,11 +292,26 @@ func (m *Manager) Apply(ctx context.Context, c Change, out io.Writer) Outcome {
 	}
 	if installErr != nil {
 		o.Err = installErr
-		return done()
+	} else {
+		o.Err = m.settle(readCtx, c, &o, want, readErr)
 	}
+	return done()
+}
+
+// settle checks what herdr installed against the target and leaves the
+// plugin enabled or disabled as wanted, returning what went wrong.
+func (m *Manager) settle(ctx context.Context, c Change, o *Outcome, want bool, readErr error) error {
 	var errs []error
 	switch {
 	case o.AfterUnknown:
+		errs = append(errs, fmt.Errorf("%w: %w", ErrUnconfirmed, readErr))
+		// herdr enables what it installs, so a plugin to be left disabled
+		// is disabled whatever its state.
+		if !want {
+			if err := m.setEnabledWithin(ctx, c.ID, false); err != nil {
+				errs = append(errs, fmt.Errorf("%s could not be disabled again: %w", c.ID, err))
+			}
+		}
 	case o.After == nil:
 		errs = append(errs, fmt.Errorf("herdr reported success, but no plugin %s is installed; the manifest may declare another id", c.ID))
 	case o.After.Commit != c.Target.Commit:
@@ -300,15 +319,14 @@ func (m *Manager) Apply(ctx context.Context, c Change, out io.Writer) Outcome {
 			c.Target.Source, o.After.Commit, c.Target.Commit))
 	}
 	if o.After != nil && o.After.Enabled != want {
-		if err := m.setEnabledWithin(readCtx, c.ID, want); err != nil {
+		if err := m.setEnabledWithin(ctx, c.ID, want); err != nil {
 			errs = append(errs, fmt.Errorf("herdr left %s %s, and it could not be %s again: %w",
 				c.ID, enabledWord(o.After.Enabled), enabledWord(want), err))
 		} else {
 			o.After.Enabled = want
 		}
 	}
-	o.Err = errors.Join(errs...)
-	return done()
+	return errors.Join(errs...)
 }
 
 func (m *Manager) setEnabledWithin(ctx context.Context, id string, enabled bool) error {

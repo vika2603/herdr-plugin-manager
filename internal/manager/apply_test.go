@@ -236,6 +236,27 @@ func TestApplyReportsAnotherInstalledCommit(t *testing.T) {
 	}
 }
 
+func TestApplyDoesNotConfirmWhatItCannotReadBack(t *testing.T) {
+	r := newRegistry(t, false, "", at("v1.0.0", commitV1, true))
+	// Once installed, the plugin list is unreadable.
+	cli, _ := fakeHerdr(t, `case "$*" in
+"plugin list --json") if [ -f `+r.next+` ]; then printf '{'; else cat `+r.file+`; fi ;;
+"plugin install "*) touch `+r.next+` ;;
+esac`)
+	r.m.CLI, r.m.Git = cli, releases
+	o := r.m.Apply(context.Background(), Change{Kind: KindUpdate, ID: "o.r", Target: Target{Source: src, Ref: "v2.0.0", Commit: commitV2}}, nil)
+	if !o.AfterUnknown || !errors.Is(o.Error(), ErrUnconfirmed) {
+		t.Fatalf("after unknown %v, err %v; want an unconfirmed change", o.AfterUnknown, o.Error())
+	}
+	if !strings.Contains(o.Error().Error(), "check it with hpm info o.r") {
+		t.Errorf("the error does not say how to check: %v", o.Error())
+	}
+	entries, _ := r.m.HistoryEntries()
+	if len(entries) != 1 || !entries[0].Failed() || !entries[0].AfterUnknown {
+		t.Errorf("history = %+v, want the change recorded as not confirmed", entries)
+	}
+}
+
 func TestApplyReportsAPluginLeftEnabled(t *testing.T) {
 	r := newRegistry(t, true, "", at("v1.0.0", commitV1, false))
 	r.server.Fail(herdr.MethodPluginDisable, "internal", "disk full")
