@@ -413,6 +413,11 @@ func TestNarrowScreenReachesNotesAndEveryKey(t *testing.T) {
 	if out := h.words(); !strings.Contains(out, "point 40") || !strings.Contains(out, "https://example/v1.1.0") {
 		t.Errorf("the notes do not scroll to their end:\n%s", out)
 	}
+	h.m.Update(tea.WindowSizeMsg{Width: 70, Height: 30})
+	h.screen()
+	if out := h.words(); !strings.Contains(out, "scroll notes") {
+		t.Errorf("reading the notes, the bar does not say how to page them:\n%s", out)
+	}
 	h.press("esc", "?")
 	out := h.words()
 	for _, want := range []string{"i install", "v version", "w homepage", "? less"} {

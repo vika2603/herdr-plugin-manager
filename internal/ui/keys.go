@@ -143,10 +143,11 @@ func (m *model) screenKeys() keyMap {
 		if d.versions != nil {
 			switch vp := d.versions; {
 			case vp.showingNotesOnly(m.w()):
-				return keyMap{short: []key.Binding{h.choose, h.cancel, h.listTab, h.step, h.notes}}
+				// Reading the notes, their page keys come first.
+				return keyMap{short: []key.Binding{h.choose, h.cancel, h.notes, h.listTab, h.step}}
 			case vp.listWidth == m.w():
 				// Too narrow for the notes beside the list.
-				return keyMap{short: []key.Binding{h.choose, h.cancel, h.notesTab, h.step}}
+				return keyMap{short: []key.Binding{h.choose, h.cancel, h.step, h.notesTab}}
 			}
 			return keyMap{short: []key.Binding{h.choose, h.cancel, h.step, h.notes}}
 		}
