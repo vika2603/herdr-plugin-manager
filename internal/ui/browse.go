@@ -293,23 +293,22 @@ func (m *model) entryPane(e market.Entry, width int) []string {
 	} else {
 		out = append(out, t.faint.Render("No description in the manifest or the repository."))
 	}
-	column := func(rows []field) {
-		for _, l := range m.fieldsIn(rows, width+len(indent)) {
-			out = append(out, strings.TrimPrefix(l, indent))
-		}
-	}
+	// The plugin's rows and its repository's share one label column, a
+	// blank row between them.
+	rows := append(append(m.entryFields(e), field{}), m.repoFields(e, true)...)
 	out = append(out, "")
-	column(m.entryFields(e))
-	out = append(out, "", strings.TrimPrefix(m.heading("Repository", repoNote(e), t.faint), indent))
-	column(m.repoFields(e, true))
+	for _, l := range m.fieldsIn(rows, width+len(indent)) {
+		out = append(out, strings.TrimRight(strings.TrimPrefix(l, indent), " "))
+	}
 	if hint := m.press(actOpen, "to see what it runs and install it"); hint != "" {
 		out = append(out, "", t.faint.Render(strings.TrimSpace(hint)))
 	}
 	return out
 }
 
-// entryFields are what the index says about the plugin itself: whether it
-// is installed, whether it can run here, its version and its topics.
+// entryFields are what the index says about the plugin itself: how it is
+// installed, when it is, whether it can run here, its version and its
+// topics.
 func (m *model) entryFields(e market.Entry) []field {
 	t := m.theme
 	mf := e.Manifest
@@ -347,32 +346,29 @@ func (m *model) entryFields(e market.Entry) []field {
 	if len(names) > 0 {
 		topics = t.fg2.Render(strings.Join(names, ", "))
 	}
-	return []field{
-		{"status", m.entryStatus(e)},
+	var rows []field
+	if status := m.entryStatus(e); status != "" {
+		rows = append(rows, field{"status", status})
+	}
+	return append(rows, []field{
 		{"platforms", platforms},
 		{"herdr", herdrNeed},
 		{"version", version},
 		{"topics", topics},
-	}
-}
-
-// repoNote says whose the repository's figures are.
-func repoNote(e market.Entry) string {
-	if e.Source.Subdir != "" {
-		return "GitHub's figures for the whole repository"
-	}
-	return "GitHub's figures"
+	}...)
 }
 
 // repoFields are GitHub's figures for the plugin's repository, one each.
 // withSource names the repository and the plugin's folder in it, for a
-// screen that does not show the source otherwise.
+// screen that does not show the source otherwise. For a plugin in a
+// subdirectory the language is said to be the whole repository's, which
+// holds more than the plugin.
 func (m *model) repoFields(e market.Entry, withSource bool) []field {
 	t := m.theme
 	r := e.Repo
 	var rows []field
 	if withSource {
-		rows = append(rows, field{"name", t.text.Render(e.Source.Repository())})
+		rows = append(rows, field{"repository", t.text.Render(e.Source.Repository())})
 		if e.Source.Subdir != "" {
 			rows = append(rows, field{"folder", t.text.Render(e.Source.Subdir)})
 		}
@@ -384,6 +380,9 @@ func (m *model) repoFields(e market.Entry, withSource bool) []field {
 	language := t.faint.Render("not reported")
 	if r.Language != "" {
 		language = t.text.Render(r.Language)
+		if e.Source.Subdir != "" {
+			language += t.faint.Render(" (whole repository)")
+		}
 	}
 	pushed := t.faint.Render("not reported")
 	if !r.PushedAt.IsZero() {
@@ -396,14 +395,14 @@ func (m *model) repoFields(e market.Entry, withSource bool) []field {
 	return rows
 }
 
-// entryStatus is whether a plugin with e's id is installed here, and when it
-// is not this listing, what is.
+// entryStatus is how a plugin with e's id is installed here, and when it is
+// not this listing, what is; "" when none is.
 func (m *model) entryStatus(e market.Entry) string {
 	t := m.theme
 	p, as := m.installedRecord(e)
 	switch as {
 	case notInstalled:
-		return t.faint.Render("not installed")
+		return ""
 	case installedFromElsewhere:
 		return mark(t.warn, glyphWarning, "installed from "+manager.SourceLabel(p)) + t.faint.Render(", not this listing; installing this one replaces it")
 	case linkedLocally:

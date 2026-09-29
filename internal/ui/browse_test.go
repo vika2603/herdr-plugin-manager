@@ -122,19 +122,24 @@ func TestWideMarketplaceShowsTheSelectedListing(t *testing.T) {
 	out := h.words()
 	for _, want := range []string{
 		"│ Agent Telegram Notify 0.1.0 · examples.agent-telegram-notify",
-		"STATUS not installed",
 		"PLATFORMS any (none declared)", "HERDR ≥ 0.9.0 ✓",
 		"VERSION 0.1.0 on the default branch",
 		"TOPICS none",
-		"REPOSITORY GitHub's figures for the whole repository",
-		"NAME ogulcancelik/herdr-plugin-examples", "FOLDER agent-telegram-notify",
-		"STARS ★ 30", "LANGUAGE TypeScript", "LAST PUSH 4 months ago · 2026-05-26", "PLUGINS 2 in this repository",
+		"REPOSITORY ogulcancelik/herdr-plugin-examples", "FOLDER agent-telegram-notify",
+		"STARS ★ 30", "LANGUAGE TypeScript (whole repository)", "LAST PUSH 4 months ago · 2026-05-26", "PLUGINS 2 in this repository",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("listing lacks %q", want)
 		}
 	}
-	h.press("down")
+	if strings.Contains(out, "STATUS") || strings.Contains(out, "GitHub's figures") {
+		t.Errorf("a plugin that is not installed needs no status row, and the repository no note:\n%s", out)
+	}
+	h.press("up")
+	if out := h.words(); !strings.Contains(out, "LANGUAGE Go") || strings.Contains(out, "(whole repository)") {
+		t.Errorf("a plugin at the repository root shares its language plainly:\n%s", out)
+	}
+	h.press("down", "down")
 	if out := h.words(); !strings.Contains(out, "No description in the manifest or the repository.") {
 		t.Errorf("a missing description should be said so:\n%s", out)
 	}
