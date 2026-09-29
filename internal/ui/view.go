@@ -674,7 +674,7 @@ func (m *model) problems(list []string) []string {
 func (m *model) entryLines(e *market.Entry) []string {
 	t := m.theme
 	mf := e.Manifest
-	problems := compat.Problems(mf.Platforms, mf.MinHerdrVersion, m.herdrVersion, compat.Platform())
+	problems := compat.Problems(mf.Platforms, mf.MinHerdrVersion, m.herdrVersion, m.platform)
 	out := []string{m.titleLine(mf.Name, mf.Version, mf.ID)}
 	if mf.Description != "" {
 		out = append(out, wrapIndented(indent+t.fg2.Render(mf.Description), m.w()-1)...)

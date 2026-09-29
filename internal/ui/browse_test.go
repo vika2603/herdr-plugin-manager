@@ -36,34 +36,42 @@ func marketFake() *fakeBackend {
 			Manifests: []market.Manifest{{Path: "herdr-plugin.toml", ID: "someone.win-tool", Name: "Win Tool", Version: "1.0.0",
 				Platforms: []string{"windows"}, Description: "Windows only helper"}},
 		},
+		{
+			Owner: "someone", Name: "mac-tool", Stars: 1,
+			Manifests: []market.Manifest{{Path: "herdr-plugin.toml", ID: "someone.mac-tool", Name: "Mac Tool", Version: "1.0.0",
+				Platforms: []string{"macos"}, Description: "macOS only helper"}},
+		},
 	}}
 	return b
 }
 
-func startMarket(t *testing.T, width int) *harness {
+// platforms are the ones the manager supports; each test of what can run
+// where runs on both, whichever the tests run on.
+var platforms = []string{"linux", "macos"}
+
+func startMarket(t *testing.T, width int, platform string) *harness {
 	t.Helper()
 	b := marketFake()
 	h := start(t, b)
 	h.m.now = func() time.Time { return time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC) }
+	h.m.platform = platform
 	h.m.Update(tea.WindowSizeMsg{Width: width, Height: 36})
 	h.press("tab")
 	return h
 }
 
 func TestMarketplaceListLeadsWithWhatAPluginIsFor(t *testing.T) {
-	h := startMarket(t, 90)
+	h := startMarket(t, 90, "macos")
 	out := h.words()
-	t.Log("\n" + out)
 	for _, want := range []string{
 		"Auto Title 0.9.1 ★ 42",
 		"Automatically generates contextual tab titles · Go · pushed 3d ago",
 		"Send a Telegram message when an agent needs you · repo TypeScript · pushed 4mo ago",
-		"Win Tool 1.0.0 ★ 2 ✕ not for macos",
 		"GitHub Link Preview 0.1.0 ★ 30",
 		"No description",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("list lacks %q", want)
+			t.Errorf("list lacks %q:\n%s", want, out)
 		}
 	}
 	if strings.Contains(out, "ogulcancelik/herdr-plugin-examples/agent-telegram-notify") {
@@ -74,11 +82,28 @@ func TestMarketplaceListLeadsWithWhatAPluginIsFor(t *testing.T) {
 	}
 }
 
+func TestMarketplaceMarksWhatCannotRunHere(t *testing.T) {
+	for _, platform := range platforms {
+		t.Run(platform, func(t *testing.T) {
+			h := startMarket(t, 90, platform)
+			out := h.words()
+			if !strings.Contains(out, "Win Tool 1.0.0 ★ 2 ✕ not for "+platform) {
+				t.Errorf("a Windows plugin is not marked:\n%s", out)
+			}
+			// Only a macOS plugin is marked on Linux, and nothing that runs
+			// here is.
+			mac := strings.Contains(out, "Mac Tool 1.0.0 ★ 1 ✕ not for "+platform)
+			if mac != (platform != "macos") || strings.Contains(out, "Auto Title 0.9.1 ★ 42 ✕") {
+				t.Errorf("marks on %s:\n%s", platform, out)
+			}
+		})
+	}
+}
+
 func TestWideMarketplaceShowsTheSelectedListing(t *testing.T) {
-	h := startMarket(t, 140)
+	h := startMarket(t, 140, "macos")
 	h.press("down")
 	out := h.words()
-	t.Log("\n" + out)
 	for _, want := range []string{
 		"│ Agent Telegram Notify 0.1.0 · examples.agent-telegram-notify",
 		"STATUS not installed",
@@ -99,18 +124,30 @@ func TestWideMarketplaceShowsTheSelectedListing(t *testing.T) {
 	}
 	h.press("down")
 	out = h.words()
-	for _, want := range []string{"language not reported", "last push not", "✕ supports windows, not macos"} {
+	for _, want := range []string{"language not reported", "last push not"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("listing lacks %q:\n%s", want, out)
 		}
 	}
 }
 
+func TestWideListingSaysWhyAPluginCannotRunHere(t *testing.T) {
+	for _, platform := range platforms {
+		t.Run(platform, func(t *testing.T) {
+			h := startMarket(t, 140, platform)
+			h.press("down", "down", "down")
+			if out := h.words(); !strings.Contains(out, "│ Win Tool") || !strings.Contains(out, "✕ supports windows, not "+platform) {
+				t.Errorf("the listing does not say why Win Tool cannot run on %s:\n%s", platform, out)
+			}
+		})
+	}
+}
+
 func TestMarketplaceSearchSaysHowToChangeIt(t *testing.T) {
-	h := startMarket(t, 120)
+	h := startMarket(t, 120, "macos")
 	h.press("/", "t", "i", "t", "l", "e", "tab")
 	out := h.words()
-	if !strings.Contains(out, "/ title · / edits · esc clears") || !strings.Contains(out, "1 of 4 match · by relevance") {
+	if !strings.Contains(out, "/ title · / edits · esc clears") || !strings.Contains(out, "1 of 5 match · by relevance") {
 		t.Errorf("a kept search does not say how to edit or clear it:\n%s", out)
 	}
 	h.press("/", "z", "z", "z")
@@ -118,7 +155,7 @@ func TestMarketplaceSearchSaysHowToChangeIt(t *testing.T) {
 		t.Errorf("no hint when nothing matches:\n%s", out)
 	}
 	h.press("esc")
-	if out := h.words(); !strings.Contains(out, "/ search the marketplace 4 plugins · by popular") {
+	if out := h.words(); !strings.Contains(out, "/ search the marketplace 5 plugins · by popular") {
 		t.Errorf("esc did not clear the search:\n%s", out)
 	}
 }

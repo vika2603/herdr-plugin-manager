@@ -190,11 +190,10 @@ func (m *model) entryMarks(e market.Entry, installed map[string]bool) []string {
 // can, as far as the index knows.
 func (m *model) incompatible(e market.Entry) string {
 	mf := e.Manifest
-	platform := compat.Platform()
 	switch {
-	case len(mf.Platforms) > 0 && !slices.Contains(mf.Platforms, platform):
-		return "not for " + platform
-	case len(compat.Problems(nil, mf.MinHerdrVersion, m.herdrVersion, platform)) > 0:
+	case len(mf.Platforms) > 0 && !slices.Contains(mf.Platforms, m.platform):
+		return "not for " + m.platform
+	case len(compat.Problems(nil, mf.MinHerdrVersion, m.herdrVersion, m.platform)) > 0:
 		return "needs herdr " + mf.MinHerdrVersion
 	}
 	return ""
@@ -217,7 +216,7 @@ func (m *model) entryPane(e market.Entry, width int) []string {
 		out = append(out, strings.TrimPrefix(l, indent))
 	}
 	mf := e.Manifest
-	for _, p := range compat.Problems(mf.Platforms, mf.MinHerdrVersion, m.herdrVersion, compat.Platform()) {
+	for _, p := range compat.Problems(mf.Platforms, mf.MinHerdrVersion, m.herdrVersion, m.platform) {
 		out = append(out, strings.Split(ansi.Wrap(t.err.Render(glyphFailed+" "+p), width, ""), "\n")...)
 	}
 	if hint := m.press(actOpen, "to see what it runs and install it"); hint != "" {
@@ -232,7 +231,7 @@ func (m *model) entryPane(e market.Entry, width int) []string {
 func (m *model) entryFields(e market.Entry) []field {
 	t := m.theme
 	mf := e.Manifest
-	problems := compat.Problems(mf.Platforms, mf.MinHerdrVersion, m.herdrVersion, compat.Platform())
+	problems := compat.Problems(mf.Platforms, mf.MinHerdrVersion, m.herdrVersion, m.platform)
 	rows := []field{{"status", m.entryStatus(e)}, {"runs on", m.runsOn(mf.Platforms, mf.MinHerdrVersion, len(problems) == 0)}}
 	version := t.text.Render(mf.Version) + t.faint.Render(" in the manifest on the default branch")
 	if mf.Version == "" {

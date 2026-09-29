@@ -19,6 +19,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/vika2603/herdr-client/herdr"
 
+	"github.com/vika2603/herdr-plugin-manager/internal/compat"
 	"github.com/vika2603/herdr-plugin-manager/internal/config"
 	"github.com/vika2603/herdr-plugin-manager/internal/manager"
 	"github.com/vika2603/herdr-plugin-manager/internal/market"
@@ -107,8 +108,10 @@ type model struct {
 	ops  *sync.WaitGroup
 	b    Backend
 	opts Options
-	// now is the clock, for how long ago a repository was pushed.
-	now func() time.Time
+	// now is the clock, for how long ago a repository was pushed, and
+	// platform this machine's manifest platform name.
+	now      func() time.Time
+	platform string
 
 	width, height int
 	tab           tab
@@ -255,13 +258,14 @@ type output struct {
 
 func newModel(ctx context.Context, b Backend, opts Options) *model {
 	m := &model{
-		ctx:     ctx,
-		ops:     &sync.WaitGroup{},
-		b:       b,
-		opts:    opts,
-		now:     time.Now,
-		checks:  map[string]manager.Checked{},
-		readmes: map[string]cachedReadme{}, releases: map[string]cachedReleases{},
+		ctx:      ctx,
+		ops:      &sync.WaitGroup{},
+		b:        b,
+		opts:     opts,
+		now:      time.Now,
+		platform: compat.Platform(),
+		checks:   map[string]manager.Checked{},
+		readmes:  map[string]cachedReadme{}, releases: map[string]cachedReleases{},
 		help:    help.New(),
 		spinner: spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 	}
