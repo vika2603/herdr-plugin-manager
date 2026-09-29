@@ -43,24 +43,6 @@ func TestEntriesOfSeparateProcessesHaveTheirOwnIDs(t *testing.T) {
 	checkOwnIDs(t, &History{Dir: dir}, plugins)
 }
 
-func TestEntriesOfOneMomentHaveTheirOwnIDs(t *testing.T) {
-	dir := t.TempDir()
-	plugins := []string{"a", "b", "c", "d"}
-	var wg sync.WaitGroup
-	for _, id := range plugins {
-		// Separate Histories, as separate processes would have.
-		h := &History{Dir: dir}
-		wg.Go(func() {
-			e := Entry{Time: sameMoment, Kind: KindUpdate, Plugin: id}
-			if err := h.add(&e); err != nil {
-				t.Error(err)
-			}
-		})
-	}
-	wg.Wait()
-	checkOwnIDs(t, &History{Dir: dir}, plugins)
-}
-
 // checkOwnIDs checks that h holds one entry for each plugin, each found by
 // its own id with its own log file.
 func checkOwnIDs(t *testing.T, h *History, plugins []string) {

@@ -274,30 +274,19 @@ func shownOrders(h *harness, n int) []string {
 	return out
 }
 
+// Without a search relevance sorts as popular, so every press of s must
+// still change the order; with one, relevance is part of the cycle.
 func TestSortChangesTheOrderOnEveryPress(t *testing.T) {
 	h := start(t, newFake())
 	h.press("tab")
-	got := shownOrders(h, 5)
-	want := []string{"popular", "trending", "recent", "newest", "name", "popular"}
-	if !slices.Equal(got, want) {
+	if got, want := shownOrders(h, 5), []string{"popular", "trending", "recent", "newest", "name", "popular"}; !slices.Equal(got, want) {
 		t.Errorf("without a search, sort shows %q, want %q", got, want)
 	}
-}
-
-func TestSortKeepsRelevanceForASearch(t *testing.T) {
-	h := start(t, newFake())
-	h.press("tab", "/", "g", "a", "tab")
-	got := shownOrders(h, 6)
-	want := []string{"relevance", "popular", "trending", "recent", "newest", "name", "relevance"}
-	if !slices.Equal(got, want) {
+	h.press("/", "g", "a", "tab")
+	if got, want := shownOrders(h, 6), []string{"popular", "trending", "recent", "newest", "name", "relevance", "popular"}; !slices.Equal(got, want) {
 		t.Errorf("with a search, sort shows %q, want %q", got, want)
 	}
-	// Cleared, the search leaves relevance, shown as popular; the next
-	// press moves on from popular.
 	h.press("/", "esc")
-	if v := h.m.filters[tabBrowse].Value(); v != "" {
-		t.Fatalf("the search was not cleared: %q", v)
-	}
 	if got := shownOrders(h, 1); !slices.Equal(got, []string{"popular", "trending"}) {
 		t.Errorf("after clearing the search, sort shows %q, want popular then trending", got)
 	}

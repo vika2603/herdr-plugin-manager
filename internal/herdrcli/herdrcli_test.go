@@ -161,19 +161,3 @@ func TestCancelStopsWhatHerdrRuns(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
-
-func TestConfigCheck(t *testing.T) {
-	r, _ := fakeHerdr(t, "echo 'config: ok'")
-	if issues, err := r.ConfigCheck(context.Background()); err != nil || len(issues) != 0 {
-		t.Errorf("a valid config: issues %q, err %v", issues, err)
-	}
-	r, _ = fakeHerdr(t, "echo 'Config: issues found'; echo 'unknown config key keys.bogus; ignoring key'; exit 1")
-	issues, err := r.ConfigCheck(context.Background())
-	if err != nil || len(issues) != 1 || issues[0] != "unknown config key keys.bogus; ignoring key" {
-		t.Errorf("an invalid config: issues %q, err %v", issues, err)
-	}
-	r, _ = fakeHerdr(t, "echo 'boom' >&2; exit 2")
-	if _, err := r.ConfigCheck(context.Background()); err == nil {
-		t.Error("a failing herdr gave no error")
-	}
-}

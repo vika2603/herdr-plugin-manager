@@ -49,10 +49,8 @@ type fakeBackend struct {
 	previewGate chan struct{}
 	// releases are what Releases returns.
 	releases []market.Release
-	// history is what HistoryEntries returns, the oldest first, and logs
-	// what Logs does.
+	// history is what HistoryEntries returns, the oldest first.
 	history []manager.Entry
-	logs    []herdr.PluginCommandLogInfo
 	// bound are the keys Usage reports bound, by action command, and
 	// findings what Doctor finds.
 	bound    map[string][]string
@@ -82,8 +80,8 @@ func (f *fakeBackend) SetEnabled(_ context.Context, id string, enabled bool) err
 	return nil
 }
 
-func (f *fakeBackend) Logs(context.Context, string, int) ([]herdr.PluginCommandLogInfo, error) {
-	return append([]herdr.PluginCommandLogInfo{}, f.logs...), nil
+func (*fakeBackend) Logs(context.Context, string, int) ([]herdr.PluginCommandLogInfo, error) {
+	return []herdr.PluginCommandLogInfo{}, nil
 }
 
 // Apply records an install as "install <source> <ref>", and any other

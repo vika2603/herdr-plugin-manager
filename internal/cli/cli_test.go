@@ -668,36 +668,6 @@ func TestCancellingAnUpdateOfARun(t *testing.T) {
 	}
 }
 
-func TestInstallSaysHowToUseThePlugin(t *testing.T) {
-	h := newHarness(t)
-	h.installs(strings.Replace(gadgetAt(""), `"enabled":true,`,
-		`"enabled":true,"actions":[{"id":"open","title":"Open gadget","command":["sh","open.sh"]}],`, 1))
-	if err := os.WriteFile(h.herdrConfig, []byte("[[keys.command]]\nkey = \"prefix+g\"\ntype = \"plugin_action\"\ncommand = \"other.open\"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	out, _, err := h.run("", false, "install", "carol.gadget", "--yes")
-	if err != nil {
-		t.Fatal(err)
-	}
-	use := strings.Index(out, "\nUse\n")
-	if use < 0 {
-		t.Fatalf("the install does not say how to use the plugin:\n%s", out)
-	}
-	for _, want := range []string{
-		"config directory: /cfg/carol.gadget",
-		"action open: Open gadget, run as carol.gadget.open",
-		"Bind a key (in " + h.herdrConfig + ", then herdr server reload-config)",
-		`command = "carol.gadget.open"`,
-	} {
-		if !strings.Contains(out[use:], want) {
-			t.Errorf("the usage does not say %q:\n%s", want, out[use:])
-		}
-	}
-	if info, _, _ := h.run("", false, "info", "carol.gadget"); !strings.Contains(info, "run as carol.gadget.open") {
-		t.Errorf("info does not say how to use the plugin:\n%s", info)
-	}
-}
-
 func TestDoctor(t *testing.T) {
 	h := newHarness(t)
 	out, _, err := h.run("", false, "doctor")

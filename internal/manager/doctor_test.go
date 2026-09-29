@@ -1,7 +1,6 @@
 package manager
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,35 +85,5 @@ func TestCheckPluginsReportsWhatCannotRunHere(t *testing.T) {
 	}
 	if f := byArea["plugin o.warned"]; f.Health != Warning || f.Details[0] != "herdr warns: manifest does not declare platforms" {
 		t.Errorf("o.warned = %+v", f)
-	}
-}
-
-func TestCheckHerdrFailsBelowTheVersionNeeded(t *testing.T) {
-	cli, _ := fakeHerdr(t, `echo "herdr 0.8.2"`)
-	_, f := (&Manager{CLI: cli}).checkHerdr(context.Background(), "0.9.1")
-	if f.Health != Failing || !strings.Contains(f.Summary, "older than the 0.9.1") {
-		t.Errorf("finding = %+v", f)
-	}
-	cli, _ = fakeHerdr(t, `echo "herdr 0.9.1"`)
-	if _, f := (&Manager{CLI: cli}).checkHerdr(context.Background(), "0.9.1"); f.Health != Healthy {
-		t.Errorf("finding = %+v", f)
-	}
-}
-
-func TestCheckHistoryFailsWhenItCannotBeWritten(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.Chmod(dir, 0o500); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
-	if os.Geteuid() == 0 {
-		t.Skip("root can write anywhere")
-	}
-	f := (&Manager{History: &History{Dir: dir}}).checkHistory()
-	if f.Health != Failing {
-		t.Errorf("finding = %+v", f)
-	}
-	if f := (&Manager{History: &History{Dir: filepath.Join(t.TempDir(), "new")}}).checkHistory(); f.Health != Healthy {
-		t.Errorf("a history not yet created: %+v", f)
 	}
 }

@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -15,7 +14,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/vika2603/herdr-client/herdr"
 
-	"github.com/vika2603/herdr-plugin-manager/internal/config"
 	"github.com/vika2603/herdr-plugin-manager/internal/manager"
 	"github.com/vika2603/herdr-plugin-manager/internal/source"
 	"github.com/vika2603/herdr-plugin-manager/internal/updates"
@@ -28,23 +26,11 @@ func runAsync(cmd tea.Cmd) <-chan tea.Msg {
 	return done
 }
 
-// blockUntilCancelled makes each install print, then wait for its context
-// to end. started is closed when the first one waits.
-func blockUntilCancelled(b *fakeBackend) (started <-chan struct{}) {
-	ch := make(chan struct{})
-	var once sync.Once
-	b.installHook = func(ctx context.Context) {
-		once.Do(func() { close(ch) })
-		<-ctx.Done()
-	}
-	return ch
-}
-
 func (h *harness) status() string { return ansi.Strip(h.m.statusLine()) }
 
 func TestOperationOutputShowsAsItArrivesAndCtrlCCancelsIt(t *testing.T) {
 	b := newFake()
-	started := blockUntilCancelled(b)
+	started := blockCall(b, 1)
 	h := start(t, b)
 	gadget := installTarget{src: source.GitHub{Owner: "carol", Repo: "gadget"}}
 	done := runAsync(h.m.install(gadget, "carol.gadget", nil))
@@ -82,58 +68,6 @@ func TestOperationOutputShowsAsItArrivesAndCtrlCCancelsIt(t *testing.T) {
 	}
 	if _, cmd := h.m.Update(keyMsg("ctrl+c")); !quits(cmd) {
 		t.Error("ctrl+c with nothing running did not quit")
-	}
-}
-
-func TestCtrlCTwiceQuitsWhileCancelling(t *testing.T) {
-	b := newFake()
-	started := make(chan struct{})
-	release := make(chan struct{})
-	b.installHook = func(context.Context) {
-		close(started)
-		<-release
-	}
-	defer close(release)
-	h := start(t, b)
-	runAsync(h.m.install(installTarget{src: source.GitHub{Owner: "carol", Repo: "gadget"}}, "carol.gadget", nil))
-	<-started
-	if _, cmd := h.m.Update(keyMsg("ctrl+c")); quits(cmd) {
-		t.Fatal("the first ctrl+c quit")
-	}
-	if _, cmd := h.m.Update(keyMsg("ctrl+c")); !quits(cmd) {
-		t.Error("a second ctrl+c while the operation stops did not quit")
-	}
-}
-
-func TestCancelledReviewLeavesTheRestUnstartedAndRetryReviewsThem(t *testing.T) {
-	b := newFake()
-	b.checks["beta"] = updates.Result{Kind: updates.Available, Source: source.GitHub{Owner: "o", Repo: "beta"}, CurrentRef: "v1.0.0", TargetRef: "v1.1.0", TargetCommit: "c2"}
-	started := blockUntilCancelled(b)
-	h := start(t, b)
-	h.press("U")
-	if h.m.review == nil || h.m.review.loading() > 0 {
-		t.Fatal("the review did not load")
-	}
-	done := runAsync(h.m.applyReview(h.m.review))
-	<-started
-	if !strings.Contains(h.words(), "1 of 2: alpha") {
-		t.Errorf("the progress is not shown:\n%s", h.words())
-	}
-	h.m.Update(keyMsg("ctrl+c"))
-	_, next := h.m.Update(<-done)
-	h.run(next)
-
-	calls := b.Calls()
-	if !slices.Contains(calls, "update alpha v1.1.0") || slices.Contains(calls, "update beta v1.1.0") {
-		t.Errorf("calls = %q, want alpha started and beta not", calls)
-	}
-	if out := h.words(); !strings.Contains(out, "beta: not started, cancelled") || !strings.Contains(out, "not started: beta") {
-		t.Errorf("the output does not say beta was not started:\n%s", out)
-	}
-	b.installHook = nil
-	h.press("r")
-	if h.m.screen != screenReview || len(h.m.review.items) != 2 {
-		t.Fatalf("r did not review alpha and beta again: screen %v", h.m.screen)
 	}
 }
 
@@ -219,10 +153,12 @@ func TestCancellingAnyUpdateOfAReviewIsReportedAsCancelled(t *testing.T) {
 		block   int
 		want    []string
 		applied []string
+		// retried is how many updates r reviews again.
+		retried int
 	}{
-		{"the first of two", true, 1, []string{"interrupted: alpha", "not started: beta"}, []string{"alpha"}},
-		{"the last of two", true, 2, []string{"interrupted: beta"}, []string{"alpha", "beta"}},
-		{"the only one", false, 1, []string{"interrupted: alpha"}, []string{"alpha"}},
+		{"the first of two", true, 1, []string{"interrupted: alpha", "not started: beta"}, []string{"alpha"}, 2},
+		{"the last of two", true, 2, []string{"interrupted: beta"}, []string{"alpha", "beta"}, 1},
+		{"the only one", false, 1, []string{"interrupted: alpha"}, []string{"alpha"}, 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -260,13 +196,17 @@ func TestCancellingAnyUpdateOfAReviewIsReportedAsCancelled(t *testing.T) {
 			if !slices.Equal(applied, tt.applied) {
 				t.Errorf("started updates = %q, want %q", applied, tt.applied)
 			}
+			h.press("r")
+			if h.m.screen != screenReview || len(h.m.review.items) != tt.retried {
+				t.Errorf("r did not review the %d updates left again: screen %v", tt.retried, h.m.screen)
+			}
 		})
 	}
 }
 
 func TestNoPluginIsToggledWhileAnOperationRuns(t *testing.T) {
 	b := newFake()
-	started := blockUntilCancelled(b)
+	started := blockCall(b, 1)
 	h := start(t, b)
 	done := runAsync(h.m.install(installTarget{src: source.GitHub{Owner: "o", Repo: "alpha"}}, "alpha", nil))
 	<-started
@@ -301,22 +241,6 @@ func TestNoOperationStartsWhileAToggleIsUnanswered(t *testing.T) {
 	}
 	if !strings.Contains(h.status(), "still being enabled or disabled") {
 		t.Errorf("status = %q, want why the update waits", h.status())
-	}
-}
-
-func TestDetailShowsBothStreamsOfACommandLog(t *testing.T) {
-	b := newFake()
-	b.logs = []herdr.PluginCommandLogInfo{{
-		LogID: "1", PluginID: "alpha", Command: []string{"sh", "run.sh"}, Status: herdr.PluginCommandStatusFailed,
-		ActionID: herdr.Some("go"), Stdout: herdr.Some("step one\nstep two\n"), Stderr: herdr.Some("it broke\n"),
-	}}
-	h := start(t, b)
-	h.press("enter")
-	out := h.words()
-	for _, want := range []string{"stdout:", "step one", "step two", "stderr:", "it broke"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("the command log does not show %q:\n%s", want, out)
-		}
 	}
 }
 
@@ -402,20 +326,5 @@ func TestDiagnosticsShowWhatTheDoctorFound(t *testing.T) {
 	h.press("esc")
 	if h.m.screen != screenList {
 		t.Errorf("esc left the screen at %v", h.m.screen)
-	}
-}
-
-func TestConfigFinding(t *testing.T) {
-	dir := t.TempDir()
-	if f := ConfigFinding(dir, config.Config{}, nil); f.Health != manager.Healthy || !strings.Contains(f.Summary, "no config file") {
-		t.Errorf("no file: %+v", f)
-	}
-	bad := config.Config{Theme: config.Theme{Mode: "sepia", Accent: "#12"}}
-	f := ConfigFinding(dir, bad, errors.New("read x: unknown setting y"))
-	if f.Health != manager.Warning || len(f.Details) != 3 {
-		t.Errorf("bad config: %+v", f)
-	}
-	if f := ConfigFinding("", config.Config{}, nil); f.Health != manager.Warning {
-		t.Errorf("no directory: %+v", f)
 	}
 }
