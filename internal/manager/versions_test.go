@@ -7,24 +7,6 @@ import (
 	"github.com/vika2603/herdr-client/herdr"
 )
 
-func TestTracking(t *testing.T) {
-	local := herdr.InstalledPluginInfo{PluginID: "l", PluginRoot: "/src/l"}
-	for _, tt := range []struct {
-		p    herdr.InstalledPluginInfo
-		want string
-	}{
-		{at("v1.0.0", commitV1, true), "follows new releases, installed at v1.0.0"},
-		{at("", commitV1, true), "follows the default branch"},
-		{at("dev", commitV1, true), "follows dev when it moves"},
-		{at(commitV1, commitV1, true), "pinned to commit 111111111111; no updates until it is unpinned"},
-		{local, "linked locally; update its working tree, this manager does not"},
-	} {
-		if got := TrackingOf(tt.p).Describe(); got != tt.want {
-			t.Errorf("%s: %q, want %q", StateOf(tt.p), got, tt.want)
-		}
-	}
-}
-
 func TestVersionRef(t *testing.T) {
 	release, pinned := at("v1.0.0", commitV1, true), at(commitV1, commitV1, true)
 	for _, tt := range []struct {

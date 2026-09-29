@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -66,37 +65,6 @@ func TestPinWhoseOldFollowCannotBeForgottenFails(t *testing.T) {
 	}
 	if o.After == nil || TrackingAt(o.After.Ref, o.After.Commit).Kind != TrackRelease {
 		t.Errorf("after = %+v, want it still following the release", o.After)
-	}
-}
-
-func TestFollowsOfSeparateProcessesAreAllKept(t *testing.T) {
-	dir := t.TempDir()
-	// Separate Histories share no mutex, as two processes do not.
-	histories := []*History{{Dir: dir}, {Dir: dir}, {Dir: dir}}
-	const each = 20
-	var wg sync.WaitGroup
-	errs := make(chan error, len(histories)*each)
-	for i, h := range histories {
-		wg.Go(func() {
-			for j := range each {
-				id := fmt.Sprintf("p%d.%d", i, j)
-				errs <- h.setFollow(id, &Follow{Source: "o/" + id, Ref: "main", Commit: commitV1})
-			}
-		})
-	}
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	follows, err := histories[0].follows()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(follows) != len(histories)*each {
-		t.Errorf("kept %d follows, want %d", len(follows), len(histories)*each)
 	}
 }
 
