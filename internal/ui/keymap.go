@@ -37,6 +37,7 @@ const (
 	actRollback       action = "rollback"
 	actRetry          action = "retry"
 	actHistory        action = "history"
+	actDoctor         action = "doctor"
 	actSort           action = "sort"
 	actVersion        action = "version"
 	actConfirm        action = "confirm"
@@ -88,6 +89,7 @@ var defaultKeys = map[action]struct {
 	actRollback:       {[]string{"z"}, []screenKind{onList, onDetail}},
 	actRetry:          {[]string{"r"}, []screenKind{onOutput}},
 	actHistory:        {[]string{"H"}, []screenKind{onList}},
+	actDoctor:         {[]string{"D"}, []screenKind{onList}},
 	actSort:           {[]string{"s"}, []screenKind{onList}},
 	actVersion:        {[]string{"v"}, []screenKind{onDetail, onPicker}},
 	actConfirm:        {[]string{"y", "Y"}, []screenKind{onDialog}},

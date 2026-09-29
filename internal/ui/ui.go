@@ -50,6 +50,7 @@ type Backend interface {
 	OpenURL(ctx context.Context, url string) error
 	HistoryEntries() ([]manager.Entry, error)
 	Usage(ctx context.Context, p herdr.InstalledPluginInfo) manager.Usage
+	Doctor(ctx context.Context, needHerdr string) []manager.Finding
 }
 
 // Options adjust the program to where it runs.
@@ -62,8 +63,10 @@ type Options struct {
 	// SelfID is the manager's own plugin id when it runs as a plugin. The
 	// list refuses to remove or disable it before asking for confirmation.
 	SelfID string
-	// Config is the config file's settings: keys and theme.
-	Config config.Config
+	// Config is the config file's settings: keys and theme, read from
+	// ConfigDir.
+	Config    config.Config
+	ConfigDir string
 	// ConfigErr is a problem reading the config file, shown on start.
 	ConfigErr error
 }
@@ -102,6 +105,8 @@ const (
 	screenReview
 	// screenHistory lists the changes recorded in the history.
 	screenHistory
+	// screenDoctor shows the diagnostics.
+	screenDoctor
 )
 
 // logLimit is how many command logs the detail view asks for.
@@ -185,6 +190,8 @@ type model struct {
 	outputLines  outputCache
 	// history is open while the recorded changes are listed.
 	history *historyView
+	// doctor is open while the diagnostics are shown.
+	doctor *doctorView
 	// showAfterLoad is the plugin whose details open when the list is next
 	// loaded.
 	showAfterLoad string

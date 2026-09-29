@@ -124,6 +124,8 @@ func (m *model) result(msg tea.Msg) (tea.Cmd, bool) {
 		return m.onOpDone(msg), true
 	case historyMsg:
 		onHistory(msg)
+	case doctorMsg:
+		onDoctor(msg)
 	case usageMsg:
 		msg.d.usage = &msg.usage
 	default:
@@ -227,6 +229,8 @@ func (m *model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.keyReview(m.keys.action(k, onList))
 	case screenHistory:
 		return m.keyHistory(m.keys.action(k, onList))
+	case screenDoctor:
+		return m.keyDoctor(m.keys.action(k, onList))
 	case screenList:
 	}
 
@@ -304,6 +308,8 @@ func (m *model) listAction(a action) (tea.Model, tea.Cmd) {
 		return m, nil
 	case actHistory:
 		return m, m.openHistory()
+	case actDoctor:
+		return m, m.openDoctor()
 	default:
 	}
 	if m.tab == tabInstalled {

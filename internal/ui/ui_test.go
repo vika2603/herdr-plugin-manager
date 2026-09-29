@@ -53,8 +53,10 @@ type fakeBackend struct {
 	// what Logs does.
 	history []manager.Entry
 	logs    []herdr.PluginCommandLogInfo
-	// bound are the keys Usage reports bound, by action command.
-	bound map[string][]string
+	// bound are the keys Usage reports bound, by action command, and
+	// findings what Doctor finds.
+	bound    map[string][]string
+	findings []manager.Finding
 }
 
 func (f *fakeBackend) record(format string, args ...any) {
@@ -190,6 +192,11 @@ func (f *fakeBackend) Usage(_ context.Context, p herdr.InstalledPluginInfo) mana
 		u.Actions = append(u.Actions, ua)
 	}
 	return u
+}
+
+func (f *fakeBackend) Doctor(context.Context, string) []manager.Finding {
+	f.record("doctor")
+	return f.findings
 }
 
 func (f *fakeBackend) HistoryEntries() ([]manager.Entry, error) {

@@ -49,6 +49,8 @@ type harness struct {
 	afterInstallFile string
 	// herdrConfig is herdr's config file.
 	herdrConfig string
+	// rateRemaining is the API requests GitHub reports left.
+	rateRemaining string
 	// blockFile lists the sources whose install waits until herdr is
 	// interrupted.
 	blockFile string
@@ -61,7 +63,7 @@ func newHarness(t *testing.T) *harness {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses a shell script as the herdr binary")
 	}
-	h := &harness{t: t, manifestIDs: map[string]string{"carol/gadget": "carol.gadget"}}
+	h := &harness{t: t, manifestIDs: map[string]string{"carol/gadget": "carol.gadget"}, rateRemaining: "59"}
 	dir := t.TempDir()
 	callsFile := filepath.Join(dir, "calls.txt")
 	h.listFile = filepath.Join(dir, "list.json")
@@ -116,6 +118,10 @@ func gadgetAt(ref string) string {
 func (h *harness) serve(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/plugins/index.json" {
 		_, _ = w.Write([]byte(index))
+		return
+	}
+	if r.URL.Path == "/rate_limit" {
+		_, _ = w.Write([]byte(`{"resources":{"core":{"limit":60,"remaining":` + h.rateRemaining + `,"reset":1790000000}}}`))
 		return
 	}
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
@@ -689,5 +695,28 @@ func TestInstallSaysHowToUseThePlugin(t *testing.T) {
 	}
 	if info, _, _ := h.run("", false, "info", "carol.gadget"); !strings.Contains(info, "run as carol.gadget.open") {
 		t.Errorf("info does not say how to use the plugin:\n%s", info)
+	}
+}
+
+func TestDoctor(t *testing.T) {
+	h := newHarness(t)
+	out, _, err := h.run("", false, "doctor")
+	if err != nil {
+		t.Fatalf("doctor failed with nothing failing (%v):\n%s", err, out)
+	}
+	for _, want := range []string{"ok    herdr", "herdr 0.9.1", "warn  server", "59 of 60 API requests left", "0 installed, none with problems", "hpm config"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("doctor does not say %q:\n%s", want, out)
+		}
+	}
+	jsonOut, _, err := h.run("", false, "doctor", "--json")
+	var findings []manager.Finding
+	if err != nil || json.Unmarshal([]byte(jsonOut), &findings) != nil || len(findings) < 8 {
+		t.Fatalf("doctor --json (%v):\n%s", err, jsonOut)
+	}
+
+	h.setInstalled(githubPlugins(map[string]string{"a": head}))
+	if _, _, err := h.run("", false, "doctor"); err == nil || !strings.Contains(err.Error(), "failing: plugins, plugin o.a") {
+		t.Errorf("a plugin whose directory is missing: err = %v", err)
 	}
 }

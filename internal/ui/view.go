@@ -46,6 +46,8 @@ func (m *model) View() tea.View {
 		content = m.viewReview()
 	case screenHistory:
 		content = m.viewHistory()
+	case screenDoctor:
+		content = m.viewDoctor()
 	default:
 		content = m.viewList()
 	}
@@ -79,7 +81,7 @@ func (m *model) bodyHeight() int {
 		chrome = listChrome
 	case screenDetail:
 		chrome = detailChrome
-	case screenOutput, screenReview, screenHistory:
+	case screenOutput, screenReview, screenHistory, screenDoctor:
 	}
 	return max(m.h()-chrome-len(m.helpLines()), 1)
 }
@@ -287,6 +289,8 @@ func (m *model) statusLine() string {
 		return m.reviewStatus()
 	case screenHistory:
 		return m.historyStatus()
+	case screenDoctor:
+		return m.doctorStatus()
 	case screenList, screenDetail, screenOutput:
 	}
 	if m.screen != screenList {

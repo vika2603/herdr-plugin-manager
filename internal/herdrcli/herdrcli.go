@@ -104,6 +104,25 @@ func (r Runner) ConfigDir(ctx context.Context, id string) (string, error) {
 	return dir, nil
 }
 
+// ConfigCheck runs `herdr config check`, which validates herdr's config
+// file, and returns what it found wrong; none when the config is valid.
+func (r Runner) ConfigCheck(ctx context.Context) (issues []string, err error) {
+	var out bytes.Buffer
+	cmd := r.command(ctx, []string{"config", "check"})
+	cmd.Stdout, cmd.Stderr = &out, &out
+	runErr := cmd.Run()
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	exitErr, failed := errors.AsType[*exec.ExitError](runErr)
+	switch {
+	case runErr == nil:
+		return nil, nil
+	case failed && exitErr.ExitCode() == 1 && len(lines) > 1:
+		// The first line says issues were found; the rest are the issues.
+		return lines[1:], nil
+	}
+	return nil, commandError(cmd.Args, runErr, out.String())
+}
+
 func (r Runner) run(ctx context.Context, args []string, out io.Writer) error {
 	if out == nil {
 		out = io.Discard

@@ -81,7 +81,7 @@ func (c *cli) root(tui TUI) *cobra.Command {
 		c.listCmd(), c.searchCmd(), c.infoCmd(), c.installCmd(), c.uninstallCmd(),
 		c.enableCmd(true), c.enableCmd(false), c.outdatedCmd(), c.updateCmd(), c.rollbackCmd(), c.historyCmd(),
 		c.versionCmd(manager.KindSwitch), c.versionCmd(manager.KindPin), c.versionCmd(manager.KindUnpin), c.versionCmd(manager.KindReinstall),
-		c.logsCmd(), c.keysCmd(),
+		c.logsCmd(), c.keysCmd(), c.doctorCmd(),
 	)
 	return root
 }
@@ -1098,4 +1098,53 @@ func containsTerm(s string, terms []string) bool {
 
 func isTerminal(f *os.File) bool {
 	return term.IsTerminal(f.Fd())
+}
+
+func (c *cli) doctorCmd() *cobra.Command {
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "doctor",
+		Short: "Check herdr, its server and config, git, GitHub and the installed plugins",
+		Long: "Check what the manager depends on: the herdr command and server, herdr's\n" +
+			"config and the keys it binds to plugin actions, git, GitHub's API, the\n" +
+			"marketplace index, the history and this manager's config; then each\n" +
+			"installed plugin that cannot run here or that herdr warns about. It changes\n" +
+			"nothing, and exits with an error when something fails.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx := cmd.Context()
+			findings := c.m.Doctor(ctx, app.MinHerdrVersion)
+			dir := app.ConfigDir(ctx, c.m)
+			cfg, err := config.Load(dir)
+			findings = append(findings, ui.ConfigFinding(dir, cfg, err))
+			if asJSON {
+				if err := c.writeJSON(findings); err != nil {
+					return err
+				}
+			} else {
+				tw := c.table()
+				for _, f := range findings {
+					fmt.Fprintf(tw, "%s\t%s\t%s\n", f.Health, f.Area, safe.Line(f.Summary))
+					for _, d := range f.Details {
+						fmt.Fprintf(tw, "\t\t  %s\n", safe.Line(d))
+					}
+				}
+				if err := tw.Flush(); err != nil {
+					return err
+				}
+			}
+			var failing []string
+			for _, f := range findings {
+				if f.Health == manager.Failing {
+					failing = append(failing, f.Area)
+				}
+			}
+			if len(failing) > 0 {
+				return fmt.Errorf("failing: %s", strings.Join(failing, ", "))
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print the findings as JSON")
+	return cmd
 }

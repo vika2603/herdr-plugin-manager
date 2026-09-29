@@ -67,10 +67,11 @@ func onOpen(ctx context.Context, env *plugin.Env) error {
 
 func onManager(ctx context.Context, env *plugin.Env) error {
 	cfg, err := config.Load(env.ConfigDir)
-	return ui.Run(ctx, app.ForPlugin(env), ui.Options{SelfID: env.PluginID, Config: cfg, ConfigErr: err})
+	return ui.Run(ctx, app.ForPlugin(env), ui.Options{SelfID: env.PluginID, Config: cfg, ConfigDir: env.ConfigDir, ConfigErr: err})
 }
 
 func runTerminal(ctx context.Context, m *manager.Manager) error {
-	cfg, err := config.Load(app.ConfigDir(ctx, m))
-	return ui.Run(ctx, m, ui.Options{AltScreen: true, Config: cfg, ConfigErr: err})
+	dir := app.ConfigDir(ctx, m)
+	cfg, err := config.Load(dir)
+	return ui.Run(ctx, m, ui.Options{AltScreen: true, Config: cfg, ConfigDir: dir, ConfigErr: err})
 }

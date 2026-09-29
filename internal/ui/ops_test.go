@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/vika2603/herdr-client/herdr"
 
+	"github.com/vika2603/herdr-plugin-manager/internal/config"
 	"github.com/vika2603/herdr-plugin-manager/internal/manager"
 	"github.com/vika2603/herdr-plugin-manager/internal/source"
 	"github.com/vika2603/herdr-plugin-manager/internal/updates"
@@ -370,5 +371,51 @@ func TestInstallOpensThePluginSayingHowToUseIt(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("the details do not say %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestDiagnosticsShowWhatTheDoctorFound(t *testing.T) {
+	b := newFake()
+	b.findings = []manager.Finding{
+		{Area: "herdr", Health: manager.Healthy, Summary: "version 0.9.1 at /bin/herdr"},
+		{Area: "server", Health: manager.Warning, Summary: "no herdr server answers", Details: []string{"without it, plugins cannot be enabled"}},
+		{Area: "git", Health: manager.Failing, Summary: "not found"},
+	}
+	h := start(t, b)
+	h.m.opts.ConfigDir = t.TempDir()
+	h.m.opts.Config.Keys = map[string][]string{"nope": {"x"}}
+	h.press("D")
+	out := h.words()
+	for _, want := range []string{
+		"✓ herdr version 0.9.1 at /bin/herdr", "▲ server no herdr server answers", "without it, plugins cannot be enabled",
+		"✕ git not found", `▲ hpm config`, `unknown key action "nope"`,
+		"1 failing, 2 with warnings, of 4 checked",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the diagnostics do not show %q:\n%s", want, out)
+		}
+	}
+	h.press("r")
+	if n := len(slices.DeleteFunc(b.Calls(), func(c string) bool { return c != "doctor" })); n != 2 {
+		t.Errorf("r ran the doctor %d times in all, want 2", n)
+	}
+	h.press("esc")
+	if h.m.screen != screenList {
+		t.Errorf("esc left the screen at %v", h.m.screen)
+	}
+}
+
+func TestConfigFinding(t *testing.T) {
+	dir := t.TempDir()
+	if f := ConfigFinding(dir, config.Config{}, nil); f.Health != manager.Healthy || !strings.Contains(f.Summary, "no config file") {
+		t.Errorf("no file: %+v", f)
+	}
+	bad := config.Config{Theme: config.Theme{Mode: "sepia", Accent: "#12"}}
+	f := ConfigFinding(dir, bad, errors.New("read x: unknown setting y"))
+	if f.Health != manager.Warning || len(f.Details) != 3 {
+		t.Errorf("bad config: %+v", f)
+	}
+	if f := ConfigFinding("", config.Config{}, nil); f.Health != manager.Warning {
+		t.Errorf("no directory: %+v", f)
 	}
 }

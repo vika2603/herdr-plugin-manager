@@ -15,7 +15,7 @@ type helpKeys struct {
 	details, toggle, update, all, check, remove, reload, logs, refresh, sort, install,
 	apply, browse, instTab, open, keep, clear, move, yes, no, cont, home, info, readme,
 	version, choose, cancel, notes, step, preview, rollback, applyReview, include, reviewed, leave,
-	stop, running, retry, history, entry key.Binding
+	stop, running, retry, history, entry, doctor, recheck key.Binding
 }
 
 func newHelpKeys(km keymap) helpKeys {
@@ -75,6 +75,7 @@ func newHelpKeys(km keymap) helpKeys {
 		reviewed: first(actOpen, "details"), leave: first(actClose, "back"),
 		stop: fixed("ctrl+c", "cancel"), running: fixed("any key", "back, it keeps running"),
 		retry: first(actRetry, "retry"), history: first(actHistory, "history"), entry: first(actOpen, "output"),
+		doctor: first(actDoctor, "diagnostics"), recheck: first(actReload, "check again"),
 	}
 }
 
@@ -111,6 +112,8 @@ func (m *model) keyMap() keyMap {
 		return keyMap{short: []key.Binding{h.cont, h.scroll}}
 	case screenHistory:
 		return keyMap{short: []key.Binding{h.entry, h.up, h.down, h.reload, h.leave}}
+	case screenDoctor:
+		return keyMap{short: []key.Binding{h.recheck, h.scroll, h.leave}}
 	case screenReview:
 		return keyMap{short: []key.Binding{h.applyReview, h.include, h.reviewed, h.up, h.down, h.leave}}
 	case screenDetail:
@@ -149,7 +152,7 @@ func (m *model) keyMap() keyMap {
 			full: [][]key.Binding{
 				nav,
 				{h.details, h.toggle, h.update, h.all, h.check, h.remove, h.rollback},
-				{h.filter, h.reload, h.home, h.output, h.history, h.browse, h.less, h.quit},
+				{h.filter, h.reload, h.home, h.output, h.history, h.doctor, h.browse, h.less, h.quit},
 			},
 		}
 	}
@@ -158,7 +161,7 @@ func (m *model) keyMap() keyMap {
 		full: [][]key.Binding{
 			nav,
 			{h.preview, h.sort, h.refresh, h.home},
-			{h.search, h.output, h.history, h.instTab, h.less, h.quit},
+			{h.search, h.output, h.history, h.doctor, h.instTab, h.less, h.quit},
 		},
 	}
 }

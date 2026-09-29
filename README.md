@@ -62,6 +62,13 @@ follows in its state directory, and checks that ref for updates. A change
 whose ref could not be kept there fails and says how the plugin is followed
 instead. A plugin installed again outside hpm follows what herdr records.
 
+`D` shows the diagnostics `hpm doctor` prints: the herdr command and server
+and whether their versions agree, herdr's config as `herdr config check`
+reports it, keys bound to plugin actions no enabled plugin declares, git,
+GitHub's API allowance, the marketplace index, the history, this manager's
+config, and each installed plugin that cannot run here, whose directory is
+gone, or that herdr warns about. It changes nothing.
+
 An installed plugin's details, which open after an install, and `hpm info`
 say how to use it: the config directory herdr gives it, the command each
 action runs by with the keys bound to it in herdr's config, and a
@@ -124,6 +131,7 @@ components.
 | `hpm pin <id>` / `hpm unpin <id> [ref]` | hold a plugin at its commit, or follow a ref again |
 | `hpm reinstall <id>` | reinstall the installed version |
 | `hpm logs <id>` | recent commands herdr ran for a plugin |
+| `hpm doctor` | check herdr, its server and config, key bindings, git, GitHub and the installed plugins |
 
 The marketplace lists what each plugin is for, its stars and last push, and
 whether it is installed, installed from another source or linked locally

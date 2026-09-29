@@ -29,6 +29,10 @@ const Name = "hpm"
 // PluginID is the id herdr-plugin.toml declares.
 const PluginID = "vika2603.plugin-manager"
 
+// MinHerdrVersion is the herdr the manager needs, as herdr-plugin.toml
+// declares it.
+const MinHerdrVersion = "0.9.1"
+
 // longName names the cache directory and the HTTP user agent, where the
 // short command name could be mistaken for another tool's.
 const longName = "herdr-plugin-manager"

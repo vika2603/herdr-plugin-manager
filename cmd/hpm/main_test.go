@@ -19,7 +19,7 @@ func TestManifestMatchesBinary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for field, want := range map[string]string{"version": app.Version, "id": app.PluginID} {
+	for field, want := range map[string]string{"version": app.Version, "id": app.PluginID, "min_herdr_version": app.MinHerdrVersion} {
 		m := regexp.MustCompile(`(?m)^` + field + ` = "([^"]+)"`).FindSubmatch(data)
 		if len(m) < 2 || string(m[1]) != want {
 			t.Errorf("manifest %s %q, binary %q", field, m, want)
