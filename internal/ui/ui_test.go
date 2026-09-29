@@ -34,10 +34,13 @@ type fakeBackend struct {
 	preview    *manager.Preview
 	installErr error
 	calls      []string
-	// lastUpdated is the plugin record the last Update was given.
+	// lastUpdated is the plugin record the last update was given.
 	lastUpdated herdr.InstalledPluginInfo
-	// installHook, when set, runs inside Install with its context.
+	// installHook, when set, runs inside an install with its context.
 	installHook func(context.Context)
+	// undo is what PlanRollback returns, with undoErr.
+	undo    manager.Undo
+	undoErr error
 	// previewGate, when set, keeps Preview reading its plugin list until it
 	// is closed.
 	previewGate chan struct{}
@@ -72,13 +75,46 @@ func (*fakeBackend) Logs(context.Context, string, int) ([]herdr.PluginCommandLog
 	return []herdr.PluginCommandLogInfo{}, nil
 }
 
-func (f *fakeBackend) Install(ctx context.Context, src source.GitHub, ref, _ string, out io.Writer) error {
-	f.record("install %s %q", src, ref)
+// Apply records an install as "install <source> <ref>", and any other
+// change as "<kind> <id> <ref>".
+func (f *fakeBackend) Apply(ctx context.Context, c manager.Change, out io.Writer) manager.Outcome {
+	t := c.Target
+	if c.Kind == manager.KindInstall {
+		f.record("install %s %q", t.Source, t.Ref)
+	} else {
+		f.record("%s %s %s", c.Kind, c.ID, t.Ref)
+	}
+	if c.Current != nil {
+		f.mu.Lock()
+		f.lastUpdated = *c.Current
+		f.mu.Unlock()
+	}
 	if f.installHook != nil {
 		f.installHook(ctx)
 	}
-	fmt.Fprintln(out, "cloning", src)
-	return f.installErr
+	fmt.Fprintln(out, "cloning", t.Source)
+	o := manager.Outcome{Kind: c.Kind, ID: c.ID, Err: f.installErr}
+	if c.Current != nil {
+		before := manager.StateOf(*c.Current)
+		o.Before = &before
+	}
+	after := manager.State{Version: "new", Source: t.Source.String(), Ref: t.Ref, Commit: t.Commit, Enabled: true}
+	if f.installErr != nil {
+		o.After = o.Before
+	} else {
+		o.After = &after
+	}
+	return o
+}
+
+func (f *fakeBackend) PlanRollback(_ context.Context, id string) (manager.Undo, error) {
+	f.record("plan-rollback %s", id)
+	return f.undo, f.undoErr
+}
+
+func (f *fakeBackend) Rollback(_ context.Context, u manager.Undo, _ io.Writer) manager.Outcome {
+	f.record("rollback %s %s", u.Entry.Plugin, u.Target.Ref)
+	return manager.Outcome{Kind: manager.KindRollback, ID: u.Entry.Plugin, Before: u.Entry.After, After: u.Entry.Before}
 }
 
 func (f *fakeBackend) RemoteReadme(_ context.Context, src source.GitHub, ref string) (*manager.Readme, error) {
@@ -105,14 +141,6 @@ func (f *fakeBackend) OpenURL(_ context.Context, url string) error {
 
 func (f *fakeBackend) Uninstall(_ context.Context, id string, _ io.Writer) error {
 	f.record("uninstall %s", id)
-	return nil
-}
-
-func (f *fakeBackend) Update(_ context.Context, p herdr.InstalledPluginInfo, res updates.Result, _ io.Writer) error {
-	f.record("update %s %s", p.PluginID, res.TargetRef)
-	f.mu.Lock()
-	f.lastUpdated = p
-	f.mu.Unlock()
 	return nil
 }
 
@@ -502,7 +530,7 @@ func TestBrowseInstall(t *testing.T) {
 	if got := b.Calls(); len(got) != 3 || got[2] != `install carol/gadget ""` {
 		t.Fatalf("calls = %q", got)
 	}
-	if !strings.Contains(h.screen(), "Installed carol.gadget") {
+	if !strings.Contains(h.screen(), "carol.gadget is installed: new at the default branch, enabled") {
 		t.Errorf("status lacks success:\n%s", h.screen())
 	}
 }
@@ -602,6 +630,68 @@ func TestFailedInstallShowsOutput(t *testing.T) {
 	if !strings.Contains(out, "cloning carol/gadget") || !strings.Contains(out, "build failed") {
 		t.Errorf("output screen lacks herdr's output or the error:\n%s", out)
 	}
+}
+
+func TestFailedUpdateSaysWhereThePluginStands(t *testing.T) {
+	b := newFake()
+	b.installErr = errors.New("build failed")
+	h := start(t, b)
+	h.press("u", "u")
+	out := h.words()
+	if h.m.screen != screenOutput || !strings.Contains(out, "build failed") || !strings.Contains(out, "alpha is unchanged: 1.0.0 at the default branch, enabled") {
+		t.Errorf("the output screen does not say alpha is unchanged:\n%s", out)
+	}
+}
+
+func TestRollback(t *testing.T) {
+	before := manager.State{Version: "0.9.0", Source: "o/alpha", Ref: "v0.9.0", Commit: "c0", Enabled: true}
+	after := manager.State{Version: "1.0.0", Source: "o/alpha", Ref: "v1.0.0", Commit: "c1", Enabled: true}
+	undo := manager.Undo{
+		Entry:  manager.Entry{Kind: manager.KindUpdate, Plugin: "alpha", Before: &before, After: &after},
+		Target: manager.Target{Source: source.GitHub{Owner: "o", Repo: "alpha"}, Ref: "v0.9.0", Commit: "c0"},
+	}
+	t.Run("previews the earlier version", func(t *testing.T) {
+		b := newFake()
+		b.undo = undo
+		h := start(t, b)
+		h.press("z")
+		out := h.words()
+		if !strings.Contains(out, "Roll back alpha") || !strings.Contains(out, "undo the update of alpha") || !strings.Contains(out, "i roll back") {
+			t.Fatalf("no rollback preview:\n%s", out)
+		}
+		if got := b.Calls(); !slices.Equal(got, []string{"plan-rollback alpha", `preview o/alpha "c0"`}) {
+			t.Fatalf("calls = %q", got)
+		}
+		h.press("i")
+		if got := b.Calls(); got[len(got)-1] != "rollback alpha v0.9.0" {
+			t.Fatalf("calls = %q", got)
+		}
+		if !strings.Contains(h.words(), "alpha: 1.0.0 at v1.0.0 (c1), enabled -> 0.9.0 at v0.9.0 (c0), enabled") {
+			t.Errorf("the status does not say where alpha stands:\n%s", h.words())
+		}
+	})
+	t.Run("an install is undone by uninstalling after asking", func(t *testing.T) {
+		b := newFake()
+		b.undo = manager.Undo{Entry: manager.Entry{Kind: manager.KindInstall, Plugin: "alpha", After: &after}, Remove: true}
+		h := start(t, b)
+		h.press("z")
+		if h.m.confirm == nil || !strings.Contains(h.m.confirm.prompt, "Uninstall alpha? That undoes its install") {
+			t.Fatalf("confirm = %+v", h.m.confirm)
+		}
+		h.press("y")
+		if got := b.Calls(); got[len(got)-1] != "uninstall alpha" {
+			t.Errorf("calls = %q", got)
+		}
+	})
+	t.Run("nothing to undo", func(t *testing.T) {
+		b := newFake()
+		b.undoErr = fmt.Errorf("%w: no change to alpha is recorded", manager.ErrNothingToUndo)
+		h := start(t, b)
+		h.press("z")
+		if h.m.screen != screenList || !strings.Contains(h.words(), "✕ nothing to roll back: no change to alpha is recorded") {
+			t.Errorf("screen:\n%s", h.words())
+		}
+	})
 }
 
 func TestFilterNarrowsList(t *testing.T) {
@@ -718,7 +808,7 @@ func TestShutdownStopsRunningOperation(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	m := newModel(ctx, b, Options{})
-	cmd := m.install(installTarget{src: source.GitHub{Owner: "carol", Repo: "gadget"}}, "carol.gadget")
+	cmd := m.install(installTarget{src: source.GitHub{Owner: "carol", Repo: "gadget"}}, "carol.gadget", nil)
 	go cmd()
 	<-started
 	m.shutdown(cancel)

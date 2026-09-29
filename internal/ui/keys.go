@@ -14,7 +14,7 @@ type helpKeys struct {
 	up, down, page, ends, scroll, back, quit, more, less, filter, search, output,
 	details, toggle, update, all, check, remove, reload, logs, refresh, sort, install,
 	apply, browse, instTab, open, keep, clear, move, yes, no, cont, home, info, readme,
-	version, choose, cancel, notes, step, preview key.Binding
+	version, choose, cancel, notes, step, preview, rollback key.Binding
 }
 
 func newHelpKeys(km keymap) helpKeys {
@@ -69,6 +69,7 @@ func newHelpKeys(km keymap) helpKeys {
 		home: first(actHomepage, "homepage"), info: first(actSwitch, "info"), readme: first(actSwitch, "readme"),
 		version: first(actVersion, "version"), choose: first(actOpen, "choose"), cancel: first(actBack, "cancel"),
 		notes: pair(actPageUp, actPageDown, "scroll notes"), step: pair(actUp, actDown, "move"),
+		rollback: first(actRollback, "roll back"),
 	}
 }
 
@@ -112,11 +113,11 @@ func (m *model) keyMap() keyMap {
 		switch {
 		case d.plugin != nil:
 			if ch, ok := m.checks[d.plugin.PluginID]; ok && ch.Err == nil && ch.Result.Kind == updates.Available {
-				return keyMap{short: []key.Binding{h.update, other, h.toggle, h.remove, h.home, h.scroll, h.back}}
+				return keyMap{short: []key.Binding{h.update, other, h.toggle, h.remove, h.rollback, h.home, h.scroll, h.back}}
 			}
-			return keyMap{short: []key.Binding{other, h.toggle, h.update, h.remove, h.home, h.logs, h.scroll, h.back}}
-		case d.update != nil:
-			return keyMap{short: []key.Binding{h.apply, other, h.home, h.scroll, h.back}}
+			return keyMap{short: []key.Binding{other, h.toggle, h.update, h.remove, h.rollback, h.home, h.logs, h.scroll, h.back}}
+		case d.change != nil:
+			return keyMap{short: []key.Binding{m.applyKey(d), other, h.home, h.scroll, h.back}}
 		default:
 			return keyMap{short: []key.Binding{h.install, other, h.version, h.home, h.scroll, h.back}}
 		}
@@ -130,7 +131,7 @@ func (m *model) keyMap() keyMap {
 			short: []key.Binding{h.details, h.browse, h.toggle, h.update, h.remove, h.filter, h.quit, m.moreKey()},
 			full: [][]key.Binding{
 				nav,
-				{h.details, h.toggle, h.update, h.all, h.check, h.remove},
+				{h.details, h.toggle, h.update, h.all, h.check, h.remove, h.rollback},
 				{h.filter, h.reload, h.home, h.output, h.browse, h.less, h.quit},
 			},
 		}
@@ -143,6 +144,15 @@ func (m *model) keyMap() keyMap {
 			{h.search, h.output, h.instTab, h.less, h.quit},
 		},
 	}
+}
+
+// applyKey is the binding that applies a change preview.
+func (m *model) applyKey(d *detail) key.Binding {
+	a, verb := changeKey(d)
+	if len(m.keys[a]) == 0 {
+		return key.NewBinding(key.WithDisabled())
+	}
+	return key.NewBinding(key.WithKeys(m.keys[a]...), key.WithHelp(m.keys.name(a), verb))
 }
 
 func (m *model) moreKey() key.Binding {

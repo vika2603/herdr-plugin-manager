@@ -55,8 +55,8 @@ func (m *model) switchView(d *detail) tea.Cmd {
 		return m.withSpinner(m.loadRemoteReadme(d, d.install.src, d.preview.Commit))
 	case d.install != nil:
 		return m.withSpinner(m.loadRemoteReadme(d, d.install.src, ""))
-	case d.update != nil:
-		return m.withSpinner(m.loadRemoteReadme(d, d.update.Result.Source, d.update.Result.TargetCommit))
+	case d.change != nil:
+		return m.withSpinner(m.loadRemoteReadme(d, d.change.target.Source, d.change.target.Commit))
 	}
 	return nil
 }
@@ -172,8 +172,8 @@ func (m *model) homepage() (string, bool) {
 			return installedHomepage(*d.plugin)
 		case d.install != nil:
 			return d.install.src.WebURL(), true
-		case d.update != nil:
-			return d.update.Result.Source.WebURL(), true
+		case d.change != nil:
+			return d.change.target.Source.WebURL(), true
 		}
 	}
 	if m.screen != screenList {

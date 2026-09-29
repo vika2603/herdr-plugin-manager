@@ -61,7 +61,23 @@ func base() *manager.Manager {
 		Market:   mc,
 		Git:      updates.Git{},
 		Platform: compat.Platform(),
+		History:  &manager.History{Dir: StateDir()},
 	}
+}
+
+// StateDir holds the change history, shared by the popup and the command
+// line: $XDG_STATE_HOME/herdr-plugin-manager, or ~/.local/state/... without
+// it. herdr gives only a plugin entrypoint its state directory, so the
+// command line could not find that one. Empty keeps no history.
+func StateDir() string {
+	if dir := os.Getenv("XDG_STATE_HOME"); filepath.IsAbs(dir) {
+		return filepath.Join(dir, longName)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".local", "state", longName)
 }
 
 // cacheDir is shared by the popup and the command line, so either one reuses

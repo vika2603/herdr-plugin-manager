@@ -54,28 +54,6 @@ func headAt(commit string) fakeLister {
 	return fakeLister{updates.Refs{Head: commit, Branches: map[string]string{}, Tags: map[string]string{"v2.0.0": commit}}}
 }
 
-func countOf(list []string, s string) int {
-	n := 0
-	for _, x := range list {
-		if x == s {
-			n++
-		}
-	}
-	return n
-}
-
-func githubPlugin(id string, enabled bool) herdr.InstalledPluginInfo {
-	return herdr.InstalledPluginInfo{
-		PluginID: id,
-		Enabled:  enabled,
-		Source: herdr.Some(herdr.PluginSourceInfo{
-			Kind:  herdr.Some(herdr.PluginSourceKindGithub),
-			Owner: herdr.Some("o"),
-			Repo:  herdr.Some("r"),
-		}),
-	}
-}
-
 func TestInstalledFallsBackToCommandWhenServerIsDown(t *testing.T) {
 	cli, calls := fakeHerdr(t, `echo '{"result":{"type":"plugin_list","plugins":[{"plugin_id":"b","name":"B","version":"1","enabled":true,"manifest_path":"/b","plugin_root":"/b"},{"plugin_id":"a","name":"A","version":"1","enabled":true,"manifest_path":"/a","plugin_root":"/a"}]}}'`)
 	m := &Manager{
@@ -106,41 +84,6 @@ func TestInstalledPrefersServer(t *testing.T) {
 	}
 	if got := calls(); got[0] != "" {
 		t.Errorf("herdr command called while the server answered: %q", got)
-	}
-}
-
-func TestUpdateKeepsDisabledPluginDisabled(t *testing.T) {
-	cli, calls := fakeHerdr(t, `exit 0`)
-	server := herdrtest.NewServer(t).Reply(herdr.MethodPluginDisable, herdr.PluginDisabledResponse{})
-	commit := strings.Repeat("2", 40)
-	m := &Manager{API: server.Client(), CLI: cli, Git: headAt(commit)}
-	res := updates.Result{Kind: updates.Available, Source: source.GitHub{Owner: "o", Repo: "r"}, TargetRef: "v2.0.0", TargetCommit: commit}
-
-	if err := m.Update(context.Background(), githubPlugin("o.r", false), res, nil); err != nil {
-		t.Fatal(err)
-	}
-	if got := calls(); !slices.Equal(got, []string{"plugin install o/r --ref v2.0.0 --yes"}) {
-		t.Errorf("calls = %q", got)
-	}
-	if got := countOf(server.Methods(), herdr.MethodPluginDisable); got != 1 {
-		t.Errorf("plugin.disable called %d times, want once", got)
-	}
-
-	if err := m.Update(context.Background(), githubPlugin("o.r", true), res, nil); err != nil {
-		t.Fatal(err)
-	}
-	if got := countOf(server.Methods(), herdr.MethodPluginDisable); got != 1 {
-		t.Errorf("an enabled plugin should not be disabled after update; plugin.disable called %d times", got)
-	}
-}
-
-func TestUpdateReportsFailedRedisable(t *testing.T) {
-	cli, _ := fakeHerdr(t, `exit 0`)
-	m := &Manager{CLI: cli, Git: headAt("h")}
-	res := updates.Result{Kind: updates.Available, Source: source.GitHub{Owner: "o", Repo: "r"}, TargetCommit: "h"}
-	err := m.Update(context.Background(), githubPlugin("o.r", false), res, nil)
-	if !errors.Is(err, ErrServerNotRunning) {
-		t.Fatalf("err = %v", err)
 	}
 }
 
@@ -391,28 +334,6 @@ func TestPreviewPicksTheLatestReleaseAtTheRoot(t *testing.T) {
 	p, err = m.Preview(ctx, source.GitHub{Owner: "o", Repo: "r"}, "main", "", "", nil)
 	if err != nil || p.Ref != "main" || p.Commit != head {
 		t.Errorf("explicit branch: ref %q commit %.7s %v", p.Ref, p.Commit, err)
-	}
-}
-
-func TestInstallRefusesAMovedSource(t *testing.T) {
-	cli, calls := fakeHerdr(t, `exit 0`)
-	m := &Manager{CLI: cli, Git: headAt(strings.Repeat("b", 40))}
-	err := m.Install(context.Background(), source.GitHub{Owner: "o", Repo: "r"}, "", strings.Repeat("a", 40), nil)
-	if !errors.Is(err, ErrMoved) {
-		t.Fatalf("err = %v, want ErrMoved", err)
-	}
-	if got := calls(); got[0] != "" {
-		t.Errorf("herdr ran although the source moved: %q", got)
-	}
-}
-
-func TestInstallReportsAnotherInstalledCommit(t *testing.T) {
-	previewed, installed := strings.Repeat("a", 40), strings.Repeat("b", 40)
-	cli, _ := fakeHerdr(t, `case "$*" in "plugin list --json") echo '{"result":{"type":"plugin_list","plugins":[{"plugin_id":"o.r","name":"R","version":"1","enabled":true,"manifest_path":"/x","plugin_root":"/x","source":{"kind":"github","owner":"o","repo":"r","resolved_commit":"`+installed+`"}}]}}';; esac`)
-	m := &Manager{CLI: cli, Git: headAt(previewed)}
-	err := m.Install(context.Background(), source.GitHub{Owner: "o", Repo: "r"}, "", previewed, nil)
-	if err == nil || !strings.Contains(err.Error(), "not the previewed") {
-		t.Fatalf("err = %v, want a report that another commit was installed", err)
 	}
 }
 

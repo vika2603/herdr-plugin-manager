@@ -34,6 +34,7 @@ const (
 	actUpdateAll      action = "update_all"
 	actToggle         action = "toggle"
 	actUninstall      action = "uninstall"
+	actRollback       action = "rollback"
 	actSort           action = "sort"
 	actVersion        action = "version"
 	actConfirm        action = "confirm"
@@ -82,6 +83,7 @@ var defaultKeys = map[action]struct {
 	actUpdateAll:      {[]string{"U"}, []screenKind{onList}},
 	actToggle:         {[]string{"space", "e"}, []screenKind{onList, onDetail}},
 	actUninstall:      {[]string{"x", "delete"}, []screenKind{onList, onDetail}},
+	actRollback:       {[]string{"z"}, []screenKind{onList, onDetail}},
 	actSort:           {[]string{"s"}, []screenKind{onList}},
 	actVersion:        {[]string{"v"}, []screenKind{onDetail, onPicker}},
 	actConfirm:        {[]string{"y", "Y"}, []screenKind{onDialog}},

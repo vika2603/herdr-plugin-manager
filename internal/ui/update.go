@@ -80,6 +80,8 @@ func (m *model) result(msg tea.Msg) (tea.Cmd, bool) {
 		m.herdrVersion = string(msg)
 	case indexMsg:
 		m.onIndex(msg)
+	case rollbackMsg:
+		return m.onRollback(msg), true
 	case checksMsg:
 		if msg.gen != m.checkGen {
 			break
@@ -351,9 +353,20 @@ func (m *model) installedAction(a action) (tea.Model, tea.Cmd) {
 		return m, m.openUpdate(p)
 	case actUninstall:
 		m.askUninstall(p)
+	case actRollback:
+		return m, m.rollback(p)
 	default:
 	}
 	return m, nil
+}
+
+// rollback plans undoing the last change to p, which a linked plugin never
+// has.
+func (m *model) rollback(p herdr.InstalledPluginInfo) tea.Cmd {
+	if !m.idle() {
+		return nil
+	}
+	return m.planRollback(p)
 }
 
 func (m *model) toggle(p herdr.InstalledPluginInfo) tea.Cmd {
@@ -434,6 +447,8 @@ func (m *model) keyDetail(k string) (tea.Model, tea.Cmd) {
 		case actUninstall:
 			m.askUninstall(p)
 			return m, nil
+		case actRollback:
+			return m, m.rollback(p)
 		case actReload:
 			return m, m.loadLogs(p.PluginID)
 		default:
@@ -446,10 +461,7 @@ func (m *model) keyDetail(k string) (tea.Model, tea.Cmd) {
 	}
 	// A preview's action has its own key, so the key that opened the
 	// preview cannot also install it when pressed twice.
-	want, verb := actInstall, "install"
-	if d.update != nil {
-		want, verb = actUpdate, "update"
-	}
+	want, verb := changeKey(d)
 	if a == actOpen && d.preview != nil {
 		m.setStatus("Press "+m.keys.name(want)+" to "+verb, false)
 		return m, nil
@@ -464,12 +476,25 @@ func (m *model) keyDetail(k string) (tea.Model, tea.Cmd) {
 	if !m.idle() {
 		return m, nil
 	}
-	if d.update != nil {
-		return m, m.withSpinner(m.update(*d.update))
+	if d.change != nil {
+		return m, m.withSpinner(m.applyChange(*d.change))
 	}
 	target := *d.install
 	target.ref, target.commit = d.preview.Ref, d.preview.Commit
-	return m, m.withSpinner(m.install(target, d.preview.Manifest.ID))
+	return m, m.withSpinner(m.install(target, d.preview.Manifest.ID, d.preview.Existing))
+}
+
+// changeKey is the key that applies a preview and what it does. An update
+// applies with the key that opened it; an install and any other change with
+// the install key.
+func changeKey(d *detail) (a action, verb string) {
+	switch {
+	case d.change == nil:
+		return actInstall, "install"
+	case d.change.kind == manager.KindUpdate:
+		return actUpdate, "update"
+	}
+	return actInstall, changeVerbs[d.change.kind][0]
 }
 
 func (m *model) keyOutput(a action) (tea.Model, tea.Cmd) {
@@ -541,7 +566,8 @@ func (m *model) openUpdate(p herdr.InstalledPluginInfo) tea.Cmd {
 		m.setStatus(p.PluginID+": "+ch.Result.Describe(), false)
 		return nil
 	}
-	d := &detail{crumb: tabNames[tabInstalled], title: "Update " + p.Name + " (" + ch.Result.Describe() + ")", loading: true, update: &ch}
+	c := updateChange(ch)
+	d := &detail{crumb: tabNames[tabInstalled], title: "Update " + p.Name + " (" + ch.Result.Describe() + ")", loading: true, change: &c}
 	m.detail, m.screen = d, screenDetail
 	return m.withSpinner(m.loadPreview(d, ch.Result.Source, ch.Result.TargetCommit, ""))
 }

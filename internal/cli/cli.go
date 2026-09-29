@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -78,7 +79,8 @@ func (c *cli) root(tui TUI) *cobra.Command {
 	root.SetErr(c.errOut)
 	root.AddCommand(
 		c.listCmd(), c.searchCmd(), c.infoCmd(), c.installCmd(), c.uninstallCmd(),
-		c.enableCmd(true), c.enableCmd(false), c.outdatedCmd(), c.updateCmd(), c.logsCmd(), c.keysCmd(),
+		c.enableCmd(true), c.enableCmd(false), c.outdatedCmd(), c.updateCmd(), c.rollbackCmd(), c.historyCmd(),
+		c.logsCmd(), c.keysCmd(),
 	)
 	return root
 }
@@ -313,7 +315,11 @@ func (c *cli) installCmd() *cobra.Command {
 			if err := c.confirm(yes, "Install "+preview.Manifest.ID+"?"); err != nil {
 				return err
 			}
-			return c.m.Install(ctx, src, preview.Ref, preview.Commit, c.out)
+			o := c.m.Apply(ctx, manager.Change{
+				Kind: manager.KindInstall, ID: preview.Manifest.ID, Current: preview.Existing,
+				Target: manager.Target{Source: src, Ref: preview.Ref, Commit: preview.Commit},
+			}, c.out)
+			return c.report(o)
 		},
 	}
 	cmd.Flags().StringVar(&ref, "ref", "", "branch, tag or commit to install (default: the latest release of a plugin at the repository root, else the default branch)")
@@ -452,7 +458,8 @@ func (c *cli) updateCmd() *cobra.Command {
 		Long: "Update the given plugins, or every plugin with an update. herdr has no update\n" +
 			"command, so each plugin is reinstalled at its new target; the new manifest is\n" +
 			"shown first because its build commands run again. A disabled plugin stays\n" +
-			"disabled, which needs a running herdr server. Plugins whose check succeeded\n" +
+			"disabled, which needs a running herdr server; without one it is not updated.\n" +
+			"Each update reports the plugin's state after it. Plugins whose check succeeded\n" +
 			"are still updated when others fail; the command then exits with an error.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -529,11 +536,168 @@ func (c *cli) updateOne(ctx context.Context, ch manager.Checked, herdrVersion st
 		}
 		return false, err
 	}
-	if err := c.m.Update(ctx, ch.Plugin, ch.Result, c.out); err != nil {
+	o := c.m.Apply(ctx, manager.Change{
+		Kind: manager.KindUpdate, ID: id, Current: &ch.Plugin,
+		Target: manager.Target{Source: ch.Result.Source, Ref: ch.Result.TargetRef, Commit: ch.Result.TargetCommit},
+	}, c.out)
+	if err := o.Error(); err != nil {
 		fmt.Fprintf(c.errOut, "%v\n", err)
 		return false, nil
 	}
+	fmt.Fprintln(c.out, o.Summary())
 	return true, nil
+}
+
+// report prints where a change left the plugin, returning its error when it
+// failed.
+func (c *cli) report(o manager.Outcome) error {
+	if err := o.Error(); err != nil {
+		return err
+	}
+	fmt.Fprintln(c.out, o.Summary())
+	return nil
+}
+
+func (c *cli) rollbackCmd() *cobra.Command {
+	var yes bool
+	cmd := &cobra.Command{
+		Use:   "rollback <plugin-id>",
+		Short: "Undo the last change this manager made to a plugin",
+		Long: "Take a plugin back to where it was before the last install, update or other\n" +
+			"change recorded in the history, enabled or disabled as it was. An install is\n" +
+			"undone by uninstalling. The earlier revision is reinstalled, so its manifest is\n" +
+			"shown first; when its branch or tag has moved on since, the plugin is pinned to\n" +
+			"the earlier commit. A plugin changed outside this manager is left alone.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			u, err := c.m.PlanRollback(ctx, args[0])
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(c.out, "To "+u.Describe()+".")
+			question := "Roll back " + args[0] + "?"
+			if u.Remove {
+				question = "Uninstall " + args[0] + "?"
+			} else {
+				preview, err := c.m.Preview(ctx, u.Target.Source, u.Target.Commit, "", c.m.HerdrVersion(ctx), nil)
+				if err != nil {
+					return err
+				}
+				preview.RequireID(args[0])
+				fmt.Fprintln(c.out)
+				printSections(c.out, preview.Sections())
+				if len(preview.Problems) > 0 {
+					return errors.New("not rolling back: see the problems above")
+				}
+			}
+			if err := c.confirm(yes, question); err != nil {
+				return err
+			}
+			return c.report(c.m.Rollback(ctx, u, c.out))
+		},
+	}
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "roll back without asking")
+	return cmd
+}
+
+func (c *cli) historyCmd() *cobra.Command {
+	var (
+		asJSON bool
+		limit  int
+		show   string
+	)
+	cmd := &cobra.Command{
+		Use:   "history [plugin-id]",
+		Short: "List the changes this manager made to plugins",
+		Long: "List the installs, updates, rollbacks and uninstalls this manager made, the\n" +
+			"newest first, with each plugin's state before and after. --show prints one\n" +
+			"change in full, with everything herdr printed during it. The history is kept\n" +
+			"in $XDG_STATE_HOME/" + "herdr-plugin-manager, or ~/.local/state/herdr-plugin-manager.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			entries, err := c.m.HistoryEntries()
+			if err != nil {
+				return err
+			}
+			if show != "" {
+				return c.showEntry(entries, show)
+			}
+			slices.Reverse(entries)
+			if len(args) == 1 {
+				entries = slices.DeleteFunc(entries, func(e manager.Entry) bool { return e.Plugin != args[0] })
+			}
+			if limit > 0 && len(entries) > limit {
+				entries = entries[:limit]
+			}
+			if asJSON {
+				if entries == nil {
+					entries = []manager.Entry{}
+				}
+				return c.writeJSON(entries)
+			}
+			if len(entries) == 0 {
+				fmt.Fprintln(c.out, "No changes recorded.")
+				return nil
+			}
+			tw := c.table()
+			fmt.Fprintln(tw, "ENTRY\tTIME\tKIND\tPLUGIN\tRESULT\tCHANGE")
+			for _, e := range entries {
+				result := "done"
+				if e.Failed() {
+					result = "failed"
+				}
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", e.ID, e.Time.Local().Format(time.DateTime), e.Kind, e.Plugin, result, change(e))
+			}
+			return tw.Flush()
+		},
+	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print the entries as JSON")
+	cmd.Flags().IntVar(&limit, "limit", 20, "maximum number of entries; 0 for all")
+	cmd.Flags().StringVar(&show, "show", "", "print the entry with this id in full, with herdr's output")
+	return cmd
+}
+
+func (c *cli) showEntry(entries []manager.Entry, id string) error {
+	i := slices.IndexFunc(entries, func(e manager.Entry) bool { return e.ID == id })
+	if i < 0 {
+		return fmt.Errorf("no history entry %q", id)
+	}
+	e := entries[i]
+	fmt.Fprintf(c.out, "%s %s %s\n", e.Time.Local().Format(time.DateTime), e.Kind, e.Plugin)
+	if e.Target != nil {
+		fmt.Fprintf(c.out, "target: %s @ %s\n", e.Target.Source, manager.RevisionLabel(e.Target.Ref, e.Target.Commit))
+	}
+	fmt.Fprintln(c.out, "before: "+stateLabel(e.Before, false))
+	fmt.Fprintln(c.out, "after: "+stateLabel(e.After, e.AfterUnknown))
+	if e.Failed() {
+		fmt.Fprintln(c.out, "error: "+safe.Text(e.Error))
+	}
+	if e.Log == "" {
+		return nil
+	}
+	log, err := manager.ReadLog(e)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(c.out, "\nOutput:")
+	fmt.Fprintln(c.out, safe.Text(log))
+	return nil
+}
+
+// change is an entry's before and after, on one line.
+func change(e manager.Entry) string {
+	return stateLabel(e.Before, false) + " -> " + stateLabel(e.After, e.AfterUnknown)
+}
+
+func stateLabel(s *manager.State, unknown bool) string {
+	switch {
+	case unknown:
+		return "unknown"
+	case s == nil:
+		return "not installed"
+	}
+	return s.String()
 }
 
 func (c *cli) logsCmd() *cobra.Command {

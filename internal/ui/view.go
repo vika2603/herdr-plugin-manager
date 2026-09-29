@@ -587,7 +587,12 @@ func (m *model) detailLines(d *detail) []string {
 	case d.err != nil:
 		return wrapIndented(indent+m.theme.err.Render(glyphFailed+" "+safe.Line(d.err.Error())), m.w()-1)
 	}
-	return m.previewLines(d.preview)
+	lines := m.previewLines(d.preview)
+	if c := d.change; c != nil && c.note != "" {
+		note := wrapIndented(indent+m.theme.warn.Render(safe.Line(c.note)), m.w()-1)
+		lines = append(append(note, ""), lines...)
+	}
+	return lines
 }
 
 // wrapIndented wraps line to width, continuing wrapped lines at the line's

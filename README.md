@@ -77,9 +77,19 @@ components.
 | `hpm uninstall <id>` | uninstall |
 | `hpm enable <id>` / `hpm disable <id>` | enable or disable |
 | `hpm outdated` / `hpm update [id...]` | check for and apply updates; exit with an error if any check fails |
+| `hpm rollback <id>` | undo the last change this manager made to a plugin |
+| `hpm history [id]` | changes made to plugins, with herdr's output |
 | `hpm logs <id>` | recent commands herdr ran for a plugin |
 
 The marketplace is not reviewed: read the preview before installing.
+
+herdr registers every plugin it installs as enabled, so an update, rollback
+or other reinstall of a disabled plugin disables it again afterwards; that
+needs a running herdr server, and without one the change is refused before
+anything runs. A failed install leaves the installed plugin as it was, and
+each change reports the plugin's state after it. Changes are recorded in
+`$XDG_STATE_HOME/herdr-plugin-manager` (`~/.local/state/herdr-plugin-manager`
+by default), which `hpm rollback` and `hpm history` read.
 
 ## Development
 

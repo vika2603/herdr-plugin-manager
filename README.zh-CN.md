@@ -70,9 +70,13 @@ accent = "teal"    # indigo、teal、magenta 或 "#RRGGBB"
 | `hpm uninstall <id>` | 卸载 |
 | `hpm enable <id>` / `hpm disable <id>` | 启用或禁用 |
 | `hpm outdated` / `hpm update [id...]` | 检查并应用更新；任一检查失败时以错误退出 |
+| `hpm rollback <id>` | 撤销本管理器对插件做的最近一次变更 |
+| `hpm history [id]` | 对插件做过的变更，以及 herdr 的输出 |
 | `hpm logs <id>` | herdr 最近为插件运行的命令 |
 
 插件市场未经审核，安装前请先看预览。
+
+herdr 安装的插件总是注册为启用，所以对已禁用插件的更新、回退或其他重装会在之后重新禁用它；这需要正在运行的 herdr server，没有 server 时变更会在执行任何操作前被拒绝。安装失败时已安装的插件保持原样，每次变更都会报告插件之后的状态。变更记录在 `$XDG_STATE_HOME/herdr-plugin-manager`（默认 `~/.local/state/herdr-plugin-manager`），供 `hpm rollback` 和 `hpm history` 读取。
 
 ## 开发
 

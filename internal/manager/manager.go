@@ -13,7 +13,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"slices"
 	"strings"
 	"sync"
@@ -51,6 +50,8 @@ type Manager struct {
 	SelfID string
 	// Platform is the manifest platform name of this machine.
 	Platform string
+	// History records the changes made to installed plugins; nil keeps none.
+	History *History
 }
 
 // IsServerDown reports whether err means no herdr server answered.
@@ -197,19 +198,6 @@ func (m *Manager) Logs(ctx context.Context, id string, limit int) ([]herdr.Plugi
 // previewed, so the build commands about to run were never shown.
 var ErrMoved = errors.New("the source changed since its preview; review it again")
 
-// Install installs src at ref (empty for the default branch), writing herdr's
-// output to out. commit is what the preview read; the install is refused
-// when ref has moved since, and checked against what herdr installed.
-func (m *Manager) Install(ctx context.Context, src source.GitHub, ref, commit string, out io.Writer) error {
-	if err := m.unmoved(ctx, src, ref, commit); err != nil {
-		return err
-	}
-	if err := m.CLI.Install(ctx, src.String(), ref, out); err != nil {
-		return err
-	}
-	return m.installedAt(ctx, src, commit)
-}
-
 // resolve returns the commit ref of src points at now.
 func (m *Manager) resolve(ctx context.Context, src source.GitHub, ref string) (string, error) {
 	if updates.IsCommit(ref) {
@@ -234,61 +222,6 @@ func (m *Manager) unmoved(ctx context.Context, src source.GitHub, ref, commit st
 	}
 	if now != commit {
 		return fmt.Errorf("%w (%s was %.12s, is now %.12s)", ErrMoved, src, commit, now)
-	}
-	return nil
-}
-
-// installedAt reports a plugin herdr installed from src at another commit
-// than commit. A moment remains between the check before install and herdr's
-// own fetch; this catches a push in it, after the fact. When the plugin
-// list cannot be read the check is skipped.
-func (m *Manager) installedAt(ctx context.Context, src source.GitHub, commit string) error {
-	plugins, err := m.Installed(ctx)
-	if err != nil {
-		return nil //nolint:nilerr // The install itself succeeded; only the after-check is skipped.
-	}
-	for _, p := range plugins {
-		got, ok := source.FromInstalled(p)
-		if !ok || got != src {
-			continue
-		}
-		if installed := p.Source.ValueOrZero().ResolvedCommit.ValueOrZero(); installed != commit {
-			return fmt.Errorf("herdr installed %s at %.12s, not the previewed %.12s; review the plugin before using it", src, installed, commit)
-		}
-	}
-	return nil
-}
-
-// Uninstall removes a plugin: a GitHub install loses its managed checkout, a
-// linked plugin is only unregistered and its directory is left alone.
-func (m *Manager) Uninstall(ctx context.Context, id string, out io.Writer) error {
-	if id == m.SelfID {
-		return ErrSelf
-	}
-	return m.CLI.Uninstall(ctx, id, out)
-}
-
-// Update reinstalls a plugin at the target a check found. A reinstall
-// registers the plugin as enabled, so a plugin that was disabled is disabled
-// again afterwards.
-func (m *Manager) Update(ctx context.Context, p herdr.InstalledPluginInfo, res updates.Result, out io.Writer) error {
-	if res.Kind != updates.Available {
-		return fmt.Errorf("%s has no update available", p.PluginID)
-	}
-	if err := m.unmoved(ctx, res.Source, res.TargetRef, res.TargetCommit); err != nil {
-		return err
-	}
-	if err := m.CLI.Install(ctx, res.Source.String(), res.TargetRef, out); err != nil {
-		return err
-	}
-	if err := m.installedAt(ctx, res.Source, res.TargetCommit); err != nil {
-		return err
-	}
-	if p.Enabled {
-		return nil
-	}
-	if err := m.SetEnabled(ctx, p.PluginID, false); err != nil {
-		return fmt.Errorf("updated %s, but it was re-enabled and could not be disabled again: %w", p.PluginID, err)
 	}
 	return nil
 }

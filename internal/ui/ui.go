@@ -34,9 +34,10 @@ type Backend interface {
 	HerdrVersion(ctx context.Context) string
 	SetEnabled(ctx context.Context, id string, enabled bool) error
 	Logs(ctx context.Context, id string, limit int) ([]herdr.PluginCommandLogInfo, error)
-	Install(ctx context.Context, src source.GitHub, ref, commit string, out io.Writer) error
+	Apply(ctx context.Context, c manager.Change, out io.Writer) manager.Outcome
 	Uninstall(ctx context.Context, id string, out io.Writer) error
-	Update(ctx context.Context, p herdr.InstalledPluginInfo, res updates.Result, out io.Writer) error
+	PlanRollback(ctx context.Context, id string) (manager.Undo, error)
+	Rollback(ctx context.Context, u manager.Undo, out io.Writer) manager.Outcome
 	CheckAll(ctx context.Context, plugins []herdr.InstalledPluginInfo) []manager.Checked
 	Index(ctx context.Context, refresh bool) (*market.Index, market.Status, error)
 	Preview(ctx context.Context, src source.GitHub, ref, hint, herdrVersion string, installed []herdr.InstalledPluginInfo) (*manager.Preview, error)
@@ -176,9 +177,9 @@ type detail struct {
 	loading bool
 	preview *manager.Preview
 	err     error
-	// install or update is what i or u does on a preview.
+	// install or change is what the preview's main key does.
 	install *installTarget
-	update  *manager.Checked
+	change  *pendingChange
 	// entry is the marketplace listing an install was opened from.
 	entry *market.Entry
 	// versions is open while the user picks another version to preview.
@@ -203,6 +204,25 @@ type installTarget struct {
 	ref string
 	// commit is what the preview read at ref.
 	commit string
+}
+
+// pendingChange is a change to an installed plugin, shown as a preview of
+// the manifest it installs before it is applied.
+type pendingChange struct {
+	kind   manager.ChangeKind
+	plugin herdr.InstalledPluginInfo
+	target manager.Target
+	// note says what the change does beyond the manifest shown.
+	note string
+	// undo is the rollback a rollback applies.
+	undo *manager.Undo
+}
+
+// changeVerbs are how a change is named: the key's description and the
+// progress title.
+var changeVerbs = map[manager.ChangeKind][2]string{
+	manager.KindUpdate:   {"update", "Updating"},
+	manager.KindRollback: {"roll back", "Rolling back"},
 }
 
 type confirm struct {
@@ -321,6 +341,11 @@ type (
 		enabled bool
 		err     error
 	}
+	rollbackMsg struct {
+		plugin herdr.InstalledPluginInfo
+		undo   manager.Undo
+		err    error
+	}
 	opDoneMsg struct {
 		title  string
 		done   string
@@ -374,8 +399,8 @@ func (m *model) loadLogs(id string) tea.Cmd {
 func (m *model) loadPreview(d *detail, src source.GitHub, ref, hint string) tea.Cmd {
 	version, installed := m.herdrVersion, m.installed
 	var requireID string
-	if d.update != nil {
-		requireID = d.update.Plugin.PluginID
+	if d.change != nil {
+		requireID = d.change.plugin.PluginID
 	}
 	return func() tea.Msg {
 		p, err := m.b.Preview(m.ctx, src, ref, hint, version, installed)
@@ -393,22 +418,27 @@ func (m *model) setEnabled(id string, enabled bool) tea.Cmd {
 }
 
 // operation runs a long backend call, collecting what herdr prints for the
-// output screen.
-func (m *model) operation(title, done string, run func(out io.Writer) error) tea.Cmd {
+// output screen. run returns what the status line says when it succeeds.
+func (m *model) operation(title string, run func(out io.Writer) (string, error)) tea.Cmd {
 	m.busy = title
 	m.status, m.statusErr = "", false
 	m.ops.Add(1)
 	return func() tea.Msg {
 		defer m.ops.Done()
 		var buf bytes.Buffer
-		err := run(&buf)
+		done, err := run(&buf)
 		return opDoneMsg{title: title, done: done, output: buf.String(), err: err}
 	}
 }
 
-func (m *model) install(t installTarget, id string) tea.Cmd {
-	return m.operation("Installing "+t.src.String(), "Installed "+id, func(out io.Writer) error {
-		return m.b.Install(m.ctx, t.src, t.ref, t.commit, out)
+// install installs t as plugin id, over existing when that is installed.
+func (m *model) install(t installTarget, id string, existing *herdr.InstalledPluginInfo) tea.Cmd {
+	return m.operation("Installing "+t.src.String(), func(out io.Writer) (string, error) {
+		o := m.b.Apply(m.ctx, manager.Change{
+			Kind: manager.KindInstall, ID: id, Current: existing,
+			Target: manager.Target{Source: t.src, Ref: t.ref, Commit: t.commit},
+		}, out)
+		return o.Summary(), o.Error()
 	})
 }
 
@@ -423,11 +453,27 @@ func (m *model) current(p herdr.InstalledPluginInfo) herdr.InstalledPluginInfo {
 	return p
 }
 
-func (m *model) update(ch manager.Checked) tea.Cmd {
-	ch.Plugin = m.current(ch.Plugin)
-	id := ch.Plugin.PluginID
-	return m.operation("Updating "+id, "Updated "+id, func(out io.Writer) error {
-		return m.b.Update(m.ctx, ch.Plugin, ch.Result, out)
+// updateChange is the change that applies an update a check found.
+func updateChange(ch manager.Checked) pendingChange {
+	r := ch.Result
+	return pendingChange{
+		kind: manager.KindUpdate, plugin: ch.Plugin,
+		target: manager.Target{Source: r.Source, Ref: r.TargetRef, Commit: r.TargetCommit},
+	}
+}
+
+// applyChange applies a previewed change.
+func (m *model) applyChange(c pendingChange) tea.Cmd {
+	c.plugin = m.current(c.plugin)
+	id := c.plugin.PluginID
+	return m.operation(changeVerbs[c.kind][1]+" "+id, func(out io.Writer) (string, error) {
+		var o manager.Outcome
+		if c.undo != nil {
+			o = m.b.Rollback(m.ctx, *c.undo, out)
+		} else {
+			o = m.b.Apply(m.ctx, manager.Change{Kind: c.kind, ID: id, Current: &c.plugin, Target: c.target}, out)
+		}
+		return o.Summary(), o.Error()
 	})
 }
 
@@ -440,7 +486,7 @@ func (m *model) updateAll(list []manager.Checked) tea.Cmd {
 		list[i].Plugin = m.current(list[i].Plugin)
 	}
 	version := m.herdrVersion
-	return m.operation(fmt.Sprintf("Updating %d plugins", len(list)), fmt.Sprintf("Updated %d plugins", len(list)), func(out io.Writer) error {
+	return m.operation(fmt.Sprintf("Updating %d plugins", len(list)), func(out io.Writer) (string, error) {
 		var failed []string
 		for _, ch := range list {
 			id := ch.Plugin.PluginID
@@ -451,9 +497,9 @@ func (m *model) updateAll(list []manager.Checked) tea.Cmd {
 			}
 		}
 		if len(failed) > 0 {
-			return fmt.Errorf("not updated: %s", strings.Join(failed, ", "))
+			return "", fmt.Errorf("not updated: %s", strings.Join(failed, ", "))
 		}
-		return nil
+		return fmt.Sprintf("Updated %d plugins", len(list)), nil
 	})
 }
 
@@ -468,13 +514,56 @@ func (m *model) updateChecked(ch manager.Checked, herdrVersion string, out io.Wr
 	if len(p.Problems) > 0 {
 		return fmt.Errorf("skipped: %s", strings.Join(p.Problems, "; "))
 	}
-	return m.b.Update(m.ctx, ch.Plugin, ch.Result, out)
+	c := updateChange(ch)
+	o := m.b.Apply(m.ctx, manager.Change{Kind: c.kind, ID: ch.Plugin.PluginID, Current: &ch.Plugin, Target: c.target}, out)
+	if err := o.Error(); err != nil {
+		return err
+	}
+	fmt.Fprintln(out, o.Summary())
+	return nil
 }
 
 func (m *model) uninstall(id string) tea.Cmd {
-	return m.operation("Uninstalling "+id, "Uninstalled "+id, func(out io.Writer) error {
-		return m.b.Uninstall(m.ctx, id, out)
+	return m.operation("Uninstalling "+id, func(out io.Writer) (string, error) {
+		return "Uninstalled " + id, m.b.Uninstall(m.ctx, id, out)
 	})
+}
+
+// planRollback finds what undoing the last change to p would do.
+func (m *model) planRollback(p herdr.InstalledPluginInfo) tea.Cmd {
+	return m.withSpinner(func() tea.Msg {
+		u, err := m.b.PlanRollback(m.ctx, p.PluginID)
+		return rollbackMsg{plugin: p, undo: u, err: err}
+	})
+}
+
+// onRollback opens the preview of a rollback, or for an install, which is
+// undone by uninstalling, asks first.
+func (m *model) onRollback(msg rollbackMsg) tea.Cmd {
+	p := msg.plugin
+	switch {
+	case msg.err != nil:
+		m.setStatus(msg.err.Error(), true)
+		return nil
+	case msg.undo.Remove:
+		if p.PluginID == m.opts.SelfID {
+			m.setStatus(manager.ErrSelf.Error(), true)
+			return nil
+		}
+		if !m.idle() {
+			return nil
+		}
+		m.confirm = &confirm{
+			prompt: "Uninstall " + p.PluginID + "? That undoes its install",
+			run:    func() tea.Cmd { return m.uninstall(p.PluginID) },
+		}
+		return nil
+	}
+	u := msg.undo
+	c := &pendingChange{kind: manager.KindRollback, plugin: p, target: u.Target, note: u.Describe(), undo: &u}
+	d := &detail{crumb: tabNames[tabInstalled], title: "Roll back " + p.Name, loading: true, change: c}
+	m.detail, m.screen = d, screenDetail
+	return m.withSpinner(m.loadPreview(d, u.Target.Source, u.Target.Commit, ""))
 }
 
 // available lists the plugins the last check found updates for, in list

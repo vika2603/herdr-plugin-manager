@@ -79,12 +79,27 @@ func newHarness(t *testing.T) *harness {
 	mc := market.NewClient(filepath.Join(dir, "cache"), "test")
 	mc.HTTP = &http.Client{Transport: redirect{server.URL}}
 	h.m = &manager.Manager{
-		API:    herdr.New(filepath.Join(dir, "missing.sock")),
-		CLI:    herdrcli.Runner{Bin: bin},
-		Market: mc,
-		Git:    lister{},
+		API:     herdr.New(filepath.Join(dir, "missing.sock")),
+		CLI:     herdrcli.Runner{Bin: bin},
+		Market:  mc,
+		Git:     lister{},
+		History: &manager.History{Dir: filepath.Join(dir, "state")},
 	}
 	return h
+}
+
+// installs sets the plugin list the next install leaves.
+func (h *harness) installs(listJSON string) {
+	h.t.Helper()
+	if err := os.WriteFile(h.afterInstallFile, []byte(listJSON), 0o600); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+// gadgetAt is the plugin list with carol.gadget installed from ref at head.
+func gadgetAt(ref string) string {
+	return `{"result":{"type":"plugin_list","plugins":[{"plugin_id":"carol.gadget","name":"Gadget","version":"0.2.0","enabled":true,"manifest_path":"/x","plugin_root":"/x",` +
+		`"source":{"kind":"github","owner":"carol","repo":"gadget","requested_ref":"` + ref + `","resolved_commit":"` + head + `"}}]}}`
 }
 
 func (h *harness) serve(w http.ResponseWriter, r *http.Request) {
@@ -93,7 +108,7 @@ func (h *harness) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(parts) == 4 && parts[3] == "herdr-plugin.toml" && parts[2] == head {
+	if len(parts) == 4 && parts[3] == "herdr-plugin.toml" && (parts[2] == head || parts[2] == older) {
 		if id, ok := h.manifestIDs[parts[0]+"/"+parts[1]]; ok {
 			_, _ = w.Write([]byte("id = \"" + id + "\"\nname = \"Gadget\"\nversion = \"0.2.0\"\nmin_herdr_version = \"0.9.0\"\n" +
 				"[[build]]\ncommand = [\"make\"]\n"))
@@ -168,6 +183,7 @@ func (r redirect) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func TestInstallAsksFirst(t *testing.T) {
 	h := newHarness(t)
+	h.installs(gadgetAt(""))
 	out, _, err := h.run("", false, "install", "carol.gadget")
 	if !errors.Is(err, errNeedYes) {
 		t.Fatalf("without a terminal or --yes: err = %v, want errNeedYes", err)
@@ -193,6 +209,7 @@ func TestInstallAsksFirst(t *testing.T) {
 func TestInstallTakesTheReleaseThePreviewShowed(t *testing.T) {
 	h := newHarness(t)
 	h.m.Git = lister{tags: []string{"v0.1.0", "v0.2.0"}}
+	h.installs(gadgetAt("v0.2.0"))
 	out, _, err := h.run("", false, "install", "carol.gadget", "--yes")
 	if err != nil {
 		t.Fatal(err)
@@ -271,9 +288,7 @@ func newCheckHarness(t *testing.T, unreachable ...string) *harness {
 	h := newHarness(t)
 	h.manifestIDs["o/a"] = "o.a"
 	h.setInstalled(githubPlugins(map[string]string{"a": older, "b": head}))
-	if err := os.WriteFile(h.afterInstallFile, []byte(githubPlugins(map[string]string{"a": head, "b": head})), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	h.installs(githubPlugins(map[string]string{"a": head, "b": head}))
 	down := map[string]bool{}
 	for _, repo := range unreachable {
 		down["https://github.com/o/"+repo+".git"] = true
@@ -387,4 +402,57 @@ func TestUpdateReportsFailedChecks(t *testing.T) {
 			t.Errorf("once up to date: err = %v, stdout:\n%s", err, out)
 		}
 	})
+}
+
+func TestUpdateThenRollBack(t *testing.T) {
+	h := newCheckHarness(t)
+	out, _, err := h.run("", false, "update", "o.a", "--yes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "o.a: 1 at default branch (aaaaaaaaaaaa), enabled -> 1 at default branch (bbbbbbbbbbbb), enabled") {
+		t.Errorf("the update does not say what changed:\n%s", out)
+	}
+
+	out, _, err = h.run("", false, "history")
+	if err != nil || !strings.Contains(out, "update  o.a     done") {
+		t.Fatalf("history: %v\n%s", err, out)
+	}
+	entries, _ := h.m.HistoryEntries()
+	out, _, err = h.run("", false, "history", "--show", entries[0].ID)
+	if err != nil || !strings.Contains(out, "before: 1 at default branch (aaaaaaaaaaaa), enabled") || !strings.Contains(out, "Output:\n") {
+		t.Errorf("history --show: %v\n%s", err, out)
+	}
+
+	// main has moved past the earlier commit, so going back pins it.
+	h.installs(`{"result":{"type":"plugin_list","plugins":[{"plugin_id":"o.a","name":"a","version":"1","enabled":true,"manifest_path":"/x","plugin_root":"/x",` +
+		`"source":{"kind":"github","owner":"o","repo":"a","requested_ref":"` + older + `","resolved_commit":"` + older + `"}}]}}`)
+	out, _, err = h.run("", false, "rollback", "o.a", "--yes")
+	if err != nil {
+		t.Fatalf("rollback: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "will be pinned to that commit") || !strings.Contains(out, "Build commands") {
+		t.Errorf("the rollback was not explained and previewed:\n%s", out)
+	}
+	if !h.ran("plugin install o/a --ref " + older + " --yes") {
+		t.Errorf("herdr was not asked for the earlier commit: %q", h.calls())
+	}
+	if _, _, err := h.run("", false, "rollback", "o.b"); err == nil || !strings.Contains(err.Error(), "nothing to roll back") {
+		t.Errorf("rollback of an unchanged plugin: %v", err)
+	}
+}
+
+func TestUpdateKeepsADisabledPluginAsItWas(t *testing.T) {
+	h := newCheckHarness(t)
+	h.setInstalled(strings.Replace(githubPlugins(map[string]string{"a": older}), `"enabled":true`, `"enabled":false`, 1))
+	_, stderr, err := h.run("", false, "update", "--yes")
+	if err == nil || !strings.Contains(err.Error(), "not updated: o.a") {
+		t.Errorf("err = %v", err)
+	}
+	if !strings.Contains(stderr, "needs a running herdr server") || !strings.Contains(stderr, "o.a is unchanged") {
+		t.Errorf("stderr does not explain:\n%s", stderr)
+	}
+	if h.ran("plugin install") {
+		t.Errorf("installed a disabled plugin with no server to disable it again: %q", h.calls())
+	}
 }
