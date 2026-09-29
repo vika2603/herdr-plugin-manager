@@ -500,4 +500,17 @@ func TestReadmeArrivingAfterLeavingItsPreviewIsShownOnReturn(t *testing.T) {
 	if out := h.screen(); !strings.Contains(out, "Does gadget things.") {
 		t.Errorf("the preview of the version already shown is stuck reading its README:\n%s", out)
 	}
+
+	// beta has no README; that is found while its update preview is open
+	// over the details left on the README view.
+	b.checks["beta"] = updates.Result{Kind: updates.Available, Source: source.GitHub{Owner: "o", Repo: "beta"}, CurrentRef: "v1.0.0", TargetRef: "v1.1.0", TargetCommit: "c2"}
+	h = start(t, b)
+	h.press("down")
+	_, open := h.m.Update(keyMsg("enter"))
+	h.press("tab", "u")
+	h.run(open)
+	h.press("esc")
+	if d := h.m.detail; d == nil || d.plugin == nil || d.view != viewInfo {
+		t.Errorf("back in the details of a plugin without a README, they are not on Info:\n%s", h.screen())
+	}
 }

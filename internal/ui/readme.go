@@ -131,9 +131,13 @@ func (m *model) onReadme(msg readmeMsg) {
 		return
 	}
 	r.loading, r.doc, r.err, r.lines = false, msg.doc, msg.err, nil
-	if m.detail == msg.d && errors.Is(msg.err, manager.ErrNoReadme) && msg.d.view == viewReadme {
+	// Without a README the detail has only its Info view, shown or not; the
+	// status speaks only of the detail on screen.
+	if errors.Is(msg.err, manager.ErrNoReadme) && msg.d.view == viewReadme {
 		msg.d.view = viewInfo
-		m.setStatus("This plugin has no README", false)
+		if m.detail == msg.d {
+			m.setStatus("This plugin has no README", false)
+		}
 	}
 }
 
