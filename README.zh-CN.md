@@ -30,11 +30,6 @@
 herdr plugin install vika2603/herdr-plugin-manager
 ```
 
-安装时还会把 `hpm` 复制到 `~/.local/bin`；为 `herdr plugin install` 设置了 `$HPM_BIN_DIR` 时则复制到该目录，
-这样可以在 shell 里直接运行 `hpm`。该位置已有不属于本程序的 `hpm` 时不会覆盖。herdr 不显示成功构建的输出，
-请用 `command -v hpm` 确认：找不到时把该目录加入 `PATH`；`PATH` 中更靠前的 `hpm`（例如 `go install` 安装的）会优先运行。
-每次更新插件都会重新复制；卸载插件不会删除这个副本。
-
 在 `~/.config/herdr/config.toml` 里给弹窗绑定按键：
 
 ```toml

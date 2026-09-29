@@ -31,14 +31,6 @@ Requires herdr 0.9.1 or newer on macOS or Linux.
 herdr plugin install vika2603/herdr-plugin-manager
 ```
 
-The install also copies `hpm` to `~/.local/bin`, or to `$HPM_BIN_DIR` when it
-is set for `herdr plugin install`, so it runs from a shell; an `hpm` already
-there that is not this program is left alone. herdr hides the output of a
-build that succeeds, so check with `command -v hpm`: add the directory to
-`PATH` if nothing is found, and note that an `hpm` earlier on `PATH`, such as
-one from `go install`, runs instead. Each update of the plugin copies it
-again; uninstalling the plugin does not remove it.
-
 Bind a key to the popup in `~/.config/herdr/config.toml`:
 
 ```toml
