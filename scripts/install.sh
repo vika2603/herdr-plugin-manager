@@ -29,3 +29,19 @@ if ! { curl -fsSL -o "$tmp/hpm.tar.gz" "$url" && tar -xzf "$tmp/hpm.tar.gz" -C "
 fi
 mv -f "$tmp/hpm" bin/hpm
 rm -rf "$tmp"
+
+# A copy goes in HPM_BIN_DIR, ~/.local/bin by default, so hpm runs from a
+# shell too. An hpm there that is not this program is left alone.
+dir=${HPM_BIN_DIR:-$HOME/.local/bin}
+target=$dir/hpm
+if [ -L "$target" ] || { [ -e "$target" ] && ! grep -q github.com/vika2603/herdr-plugin-manager "$target"; }; then
+	echo "left $target alone: it is not hpm" >&2
+elif mkdir -p "$dir" && new=$(mktemp "$dir/.hpm.XXXXXX") && cp bin/hpm "$new" && chmod 755 "$new" && mv -f "$new" "$target"; then
+	case ":$PATH:" in
+	*":$dir:"*) ;;
+	*) echo "installed $target; add $dir to PATH to run hpm" >&2 ;;
+	esac
+else
+	rm -f "${new:-}"
+	echo "could not install $target" >&2
+fi
