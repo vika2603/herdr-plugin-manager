@@ -89,14 +89,24 @@ func (c *cli) root(tui TUI) *cobra.Command {
 func (c *cli) listCmd() *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:   "list",
+		Use:   "list [filter...]",
 		Short: "List installed and linked plugins",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			plugins, err := c.m.Installed(cmd.Context())
+		Long: "List installed and linked plugins; with a filter, those whose id, name,\n" +
+			"description or source has every word, and that are in every state named as\n" +
+			"is:<state>, or not in it as -is:<state>. The states are " + strings.Join(manager.InstalledStates, ", ") + ";\n" +
+			"update, current and failed are what an update check finds, and run one.\n" +
+			"The popup's filter takes the same.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			f, text, err := manager.ParseFilter(strings.Join(args, " "), manager.InstalledStates)
 			if err != nil {
 				return err
 			}
+			plugins, err := c.m.Installed(ctx)
+			if err != nil {
+				return err
+			}
+			plugins = c.filterInstalled(ctx, plugins, f, text)
 			if asJSON {
 				return c.writeJSON(plugins)
 			}
@@ -122,6 +132,50 @@ func (c *cli) listCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print herdr's plugin records as JSON")
 	return cmd
+}
+
+func (c *cli) writeSearchJSON(entries []market.Entry, terms []string, installed map[string]bool) error {
+	out := make([]searchResult, len(entries))
+	for i, e := range entries {
+		out[i] = searchResult{
+			ID: e.Manifest.ID, Name: e.Manifest.Name, Version: e.Manifest.Version,
+			Description: market.ShownDescription(e, terms), Source: e.Source.String(), URL: e.Source.WebURL(),
+			Stars: e.Repo.Stars, PushedAt: e.Repo.PushedAt.Format(time.RFC3339),
+			MinHerdrVersion: e.Manifest.MinHerdrVersion, Platforms: e.Manifest.Platforms,
+			Installed: installed[e.Manifest.ID],
+		}
+	}
+	return c.writeJSON(out)
+}
+
+// filterListings keeps the listings in the states f names; installed says
+// which ids are installed.
+func (c *cli) filterListings(ctx context.Context, entries []market.Entry, f manager.Filter, installed map[string]bool) []market.Entry {
+	if f.Empty() {
+		return entries
+	}
+	version := c.m.HerdrVersion(ctx)
+	return slices.DeleteFunc(slices.Clone(entries), func(e market.Entry) bool {
+		return !f.Keeps(manager.ListingState(installed[e.Manifest.ID], e.Manifest.Platforms, e.Manifest.MinHerdrVersion, version, c.m.Platform))
+	})
+}
+
+// filterInstalled keeps the plugins that have text and are in the states f
+// names, checking for updates only when f asks what a check finds.
+func (c *cli) filterInstalled(ctx context.Context, plugins []herdr.InstalledPluginInfo, f manager.Filter, text string) []herdr.InstalledPluginInfo {
+	if f.Empty() && text == "" {
+		return plugins
+	}
+	checks := map[string]*manager.Checked{}
+	if f.Uses(manager.CheckStates...) {
+		for _, ch := range c.m.CheckAll(ctx, plugins) {
+			checks[ch.Plugin.PluginID] = &ch
+		}
+	}
+	version := c.m.HerdrVersion(ctx)
+	return slices.DeleteFunc(plugins, func(p herdr.InstalledPluginInfo) bool {
+		return !manager.MatchesText(p, text) || !f.Keeps(manager.InstalledState(p, checks[p.PluginID], version, c.m.Platform))
+	})
 }
 
 // searchResult is the JSON form of a marketplace entry.
@@ -153,7 +207,9 @@ func (c *cli) searchCmd() *cobra.Command {
 			"Every query term must appear in the plugin's id, name, description, source,\n" +
 			"language or topics. Results are ranked by where the terms appear: the name\n" +
 			"and id first, then descriptions, then topics; topics that matched are shown\n" +
-			"in brackets. The index is unreviewed: a listing is not an endorsement.",
+			"in brackets. is:installed, is:compatible and is:incompatible, or -is:<state>,\n" +
+			"keep the listings in or out of that state. The index is unreviewed: a\n" +
+			"listing is not an endorsement.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			order, ok := market.ParseOrder(sortBy)
 			if !ok {
@@ -165,27 +221,20 @@ func (c *cli) searchCmd() *cobra.Command {
 				return err
 			}
 			installed := c.installedIDs(ctx)
-			query := strings.Join(args, " ")
+			f, query, err := manager.ParseFilter(strings.Join(args, " "), manager.ListingStates)
+			if err != nil {
+				return err
+			}
 			terms := market.Terms(query)
 			entries := ix.Entries()
 			market.Sort(entries, order)
-			entries = market.Search(entries, query, order)
+			entries = c.filterListings(ctx, market.Search(entries, query, order), f, installed)
 			total := len(entries)
 			if limit > 0 && len(entries) > limit {
 				entries = entries[:limit]
 			}
 			if asJSON {
-				out := make([]searchResult, len(entries))
-				for i, e := range entries {
-					out[i] = searchResult{
-						ID: e.Manifest.ID, Name: e.Manifest.Name, Version: e.Manifest.Version,
-						Description: market.ShownDescription(e, terms), Source: e.Source.String(), URL: e.Source.WebURL(),
-						Stars: e.Repo.Stars, PushedAt: e.Repo.PushedAt.Format(time.RFC3339),
-						MinHerdrVersion: e.Manifest.MinHerdrVersion, Platforms: e.Manifest.Platforms,
-						Installed: installed[e.Manifest.ID],
-					}
-				}
-				return c.writeJSON(out)
+				return c.writeSearchJSON(entries, terms, installed)
 			}
 			if total == 0 {
 				fmt.Fprintln(c.out, "No plugins match.")

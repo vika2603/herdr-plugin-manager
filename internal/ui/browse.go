@@ -76,7 +76,7 @@ func (m *model) browseItems(width int) []string {
 		}
 		return m.emptyBrowse()
 	}
-	terms := market.Terms(m.filters[tabBrowse].Value())
+	terms := market.Terms(m.searchText())
 	var out []string
 	start, end := m.offset[tabBrowse], min(m.offset[tabBrowse]+m.pageSize(), len(entries))
 	for i := start; i < end; i++ {

@@ -299,6 +299,9 @@ func (m *model) statusLine() string {
 		}
 		return ""
 	}
+	if _, _, err := m.filterOf(m.tab); err != nil {
+		return " " + t.err.Render(glyphFailed+" "+err.Error())
+	}
 	if m.tab == tabInstalled {
 		switch {
 		case m.installedErr != nil:
@@ -424,7 +427,8 @@ func (m *model) installedItems() []string {
 		}
 		return m.empty("No plugins installed yet." + m.press(actSwitch, "to browse the marketplace"))
 	}
-	terms := market.Terms(m.filters[tabInstalled].Value())
+	_, text, _ := m.filterOf(tabInstalled)
+	terms := market.Terms(text)
 	var out []string
 	start, end := m.offset[tabInstalled], min(m.offset[tabInstalled]+m.pageSize(), len(list))
 	for i := start; i < end; i++ {

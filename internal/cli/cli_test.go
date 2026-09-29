@@ -690,3 +690,14 @@ func TestDoctor(t *testing.T) {
 		t.Errorf("a plugin whose directory is missing: err = %v", err)
 	}
 }
+
+func TestListFiltersByState(t *testing.T) {
+	h := newCheckHarness(t)
+	out, _, err := h.run("", false, "list", "is:update")
+	if err != nil || !strings.Contains(out, "o.a") || strings.Contains(out, "o.b") {
+		t.Errorf("list is:update (%v):\n%s", err, out)
+	}
+	if _, _, err := h.run("", false, "list", "is:nope"); err == nil || !strings.Contains(err.Error(), "unknown filter is:nope") {
+		t.Errorf("an unknown state: err = %v", err)
+	}
+}

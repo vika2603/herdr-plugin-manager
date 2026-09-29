@@ -51,7 +51,9 @@ description = "Manage plugins"
 
 按 `U` 会在执行前审阅所有可用更新：每个更新改变了什么，以及哪些无法在当前环境运行。`space` 排除某个更新，`enter` 查看完整内容，`u` 应用其余更新。
 
-每次安装、更新和版本变更都让 herdr 安装预览时显示的那个 commit，所以运行的构建命令就是审阅过的那些，即使分支或 tag 之后又有移动。herdr 会把这样的插件记为固定在该 commit（`herdr plugin list` 中可见）；hpm 在状态目录里记下它跟踪的 ref，并按这个 ref 检查更新；这个 ref 没能记下时，变更按失败报告，并说明插件实际的跟踪方式。在 hpm 之外重新安装的插件，以 herdr 的记录为准。按 `D` 显示与 `hpm doctor` 相同的诊断：herdr 命令与 server 及二者版本是否一致、`herdr config check` 报告的 herdr 配置问题、绑定到不存在或已禁用插件 action 的按键、git、GitHub API 剩余额度、插件市场索引、变更历史、本管理器的配置，以及无法在当前环境运行、目录缺失或 herdr 对其给出警告的已安装插件。诊断不做任何修改。
+每次安装、更新和版本变更都让 herdr 安装预览时显示的那个 commit，所以运行的构建命令就是审阅过的那些，即使分支或 tag 之后又有移动。herdr 会把这样的插件记为固定在该 commit（`herdr plugin list` 中可见）；hpm 在状态目录里记下它跟踪的 ref，并按这个 ref 检查更新；这个 ref 没能记下时，变更按失败报告，并说明插件实际的跟踪方式。在 hpm 之外重新安装的插件，以 herdr 的记录为准。已安装列表的筛选（`/`）和 `hpm list` 除关键词外还接受 `is:` 条件：`is:update`、`is:current`、`is:failed` 对应最近一次更新检查的结果，另有 `is:enabled`、`is:disabled`、`is:pinned`、`is:warning`、`is:compatible`、`is:incompatible` 和 `is:local`；`-is:` 表示排除该状态。插件市场搜索和 `hpm search` 接受 `is:installed`、`is:compatible` 和 `is:incompatible`，其余搜索词的排序方式不变。
+
+按 `D` 显示与 `hpm doctor` 相同的诊断：herdr 命令与 server 及二者版本是否一致、`herdr config check` 报告的 herdr 配置问题、绑定到不存在或已禁用插件 action 的按键、git、GitHub API 剩余额度、插件市场索引、变更历史、本管理器的配置，以及无法在当前环境运行、目录缺失或 herdr 对其给出警告的已安装插件。诊断不做任何修改。
 
 已安装插件的详情（安装完成后会自动打开）和 `hpm info` 会说明如何使用它：herdr 为它提供的配置目录、每个 action 的调用 id 及 herdr 配置中已绑定的按键，并为尚未绑定按键的 action 给出可加入的 `[[keys.command]]` 配置。对已安装的插件，`v` 列出可切换的版本，也可以重装、固定或解除固定；`z` 回退最近一次变更。更新或其他变更的预览先说明变更的性质，例如新的 release，或者所跟踪分支上有新提交而版本号不变；然后展示 release notes（没有时展示提交标题），以及插件会运行的内容有哪些变化。无法读取 GitHub 时，预览会说明变化内容未知。
 

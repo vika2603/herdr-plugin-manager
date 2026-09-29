@@ -177,7 +177,7 @@ func TestMarketplaceSearchSaysHowToChangeIt(t *testing.T) {
 		t.Errorf("no hint when nothing matches:\n%s", out)
 	}
 	h.press("esc")
-	if out := h.words(); !strings.Contains(out, "/ search the marketplace 5 plugins · by popular") {
+	if out := h.words(); !strings.Contains(out, "/ search the marketplace, or is:installed, is:compatible 5 plugins · by popular") {
 		t.Errorf("esc did not clear the search:\n%s", out)
 	}
 }

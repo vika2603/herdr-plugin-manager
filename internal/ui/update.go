@@ -3,7 +3,6 @@ package ui
 import (
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
@@ -137,6 +136,7 @@ func (m *model) result(msg tea.Msg) (tea.Cmd, bool) {
 func (m *model) onInstalled(msg installedMsg) tea.Cmd {
 	m.loaded = true
 	m.installed, m.installedErr = msg.plugins, msg.err
+	m.installedGen++
 	m.clamp(tabInstalled)
 	if msg.err != nil || len(msg.plugins) == 0 {
 		return nil
@@ -704,18 +704,6 @@ func (m *model) clamp(t tab) {
 		o = c - page + 1
 	}
 	m.offset[t] = max(min(o, max(n-page, 0)), 0)
-}
-
-func matchesInstalled(p herdr.InstalledPluginInfo, query string) bool {
-	haystack := strings.ToLower(strings.Join([]string{
-		p.PluginID, p.Name, p.Description.ValueOrZero(), manager.SourceLabel(p),
-	}, "\n"))
-	for term := range strings.FieldsSeq(strings.ToLower(query)) {
-		if !strings.Contains(haystack, term) {
-			return false
-		}
-	}
-	return true
 }
 
 func enabledWord(enabled bool) string {

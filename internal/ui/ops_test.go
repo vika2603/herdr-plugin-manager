@@ -328,3 +328,40 @@ func TestDiagnosticsShowWhatTheDoctorFound(t *testing.T) {
 		t.Errorf("esc left the screen at %v", h.m.screen)
 	}
 }
+
+func TestFiltersChoosePluginsByState(t *testing.T) {
+	b := newFake()
+	h := start(t, b)
+	shows := func(ids ...string) {
+		t.Helper()
+		var got []string
+		for _, p := range h.m.visibleInstalled() {
+			got = append(got, p.PluginID)
+		}
+		if !slices.Equal(got, ids) {
+			t.Errorf("filter %q shows %q, want %q", h.m.filters[tabInstalled].Value(), got, ids)
+		}
+	}
+	for query, want := range map[string][]string{
+		"is:update": {"alpha"}, "-is:enabled": {"beta"}, "is:current is:disabled": {"beta"}, "alp is:enabled": {"alpha"},
+	} {
+		h.m.filters[tabInstalled].SetValue(query)
+		shows(want...)
+	}
+	h.m.filters[tabInstalled].SetValue("is:outdated")
+	if !strings.Contains(h.status(), "unknown filter is:outdated; is: takes enabled, disabled, update") {
+		t.Errorf("status = %q, want the states is: takes", h.status())
+	}
+
+	b.plugins = append(b.plugins, plugin("carol.gadget", true))
+	h.run(h.m.loadInstalled())
+	h.m.tab = tabBrowse
+	h.m.filters[tabBrowse].SetValue("is:installed")
+	if got := h.m.visibleEntries(); len(got) != 1 || got[0].Manifest.ID != "carol.gadget" {
+		t.Errorf("is:installed shows %d listings", len(got))
+	}
+	h.m.filters[tabBrowse].SetValue("-is:installed")
+	if got := h.m.visibleEntries(); len(got) != 0 {
+		t.Errorf("-is:installed shows %d listings, want none", len(got))
+	}
+}

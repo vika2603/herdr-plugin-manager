@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -131,6 +132,8 @@ type model struct {
 
 	installed    []herdr.InstalledPluginInfo
 	installedErr error
+	// installedGen changes whenever installed is loaded again.
+	installedGen int
 	loaded       bool
 	checks       map[string]manager.Checked
 	checking     bool
@@ -240,11 +243,13 @@ type detail struct {
 }
 
 type searchCache struct {
-	valid   bool
-	query   string
-	order   market.Order
-	version int
-	result  []market.Entry
+	valid        bool
+	query        string
+	order        market.Order
+	version      int
+	installedGen int
+	herdrVersion string
+	result       []market.Entry
 }
 
 type installTarget struct {
@@ -311,10 +316,10 @@ func newModel(ctx context.Context, b Backend, opts Options) *model {
 	}
 	for i := range m.filters {
 		f := textinput.New()
-		f.Placeholder = "filter installed plugins"
+		f.Placeholder = "filter by name, or is:update, is:disabled, is:warning, is:incompatible"
 		m.filters[i] = f
 	}
-	m.filters[tabBrowse].Placeholder = "search the marketplace"
+	m.filters[tabBrowse].Placeholder = "search the marketplace, or is:installed, is:compatible"
 	var err error
 	if m.keys, err = newKeymap(opts.Config.Keys); err != nil {
 		m.setStatus(err.Error()+"; using the default keys", true)
@@ -593,30 +598,60 @@ func (m *model) checkGaps() (failed, unchecked int) {
 
 // visibleInstalled and visibleEntries apply the tab's filter.
 func (m *model) visibleInstalled() []herdr.InstalledPluginInfo {
-	query := m.filters[tabInstalled].Value()
-	if query == "" {
+	if m.filters[tabInstalled].Value() == "" {
 		return m.installed
 	}
+	f, text, _ := m.filterOf(tabInstalled)
 	var out []herdr.InstalledPluginInfo
 	for _, p := range m.installed {
-		if matchesInstalled(p, query) {
+		var check *manager.Checked
+		if ch, ok := m.checks[p.PluginID]; ok {
+			check = &ch
+		}
+		if manager.MatchesText(p, text) && f.Keeps(manager.InstalledState(p, check, m.herdrVersion, m.platform)) {
 			out = append(out, p)
 		}
 	}
 	return out
 }
 
+// filterOf splits a tab's filter into its is: terms, which choose plugins
+// by state, and the text searched for.
+func (m *model) filterOf(tb tab) (f manager.Filter, text string, err error) {
+	states := manager.InstalledStates
+	if tb == tabBrowse {
+		states = manager.ListingStates
+	}
+	return manager.ParseFilter(m.filters[tb].Value(), states)
+}
+
+// searchText is the marketplace search without its is: terms.
+func (m *model) searchText() string {
+	_, text, _ := m.filterOf(tabBrowse)
+	return text
+}
+
 // visibleEntries searches m.entries, which is sorted whenever it is loaded
-// or the order changes. The result is kept until the query, the order or the
-// entries change, since the view asks for it on every frame.
+// or the order changes, and keeps those in the states the search's is:
+// terms name. The result is kept until the query, the order, the entries or
+// the installed plugins change, since the view asks for it on every frame.
 func (m *model) visibleEntries() []market.Entry {
 	query := m.filters[tabBrowse].Value()
 	c := &m.search
-	if c.valid && c.query == query && c.order == m.order && c.version == m.entriesVersion {
+	if c.valid && c.query == query && c.order == m.order && c.version == m.entriesVersion &&
+		c.installedGen == m.installedGen && c.herdrVersion == m.herdrVersion {
 		return c.result
 	}
+	f, text, _ := m.filterOf(tabBrowse)
+	result := market.Search(m.entries, text, m.order)
+	if !f.Empty() {
+		result = slices.DeleteFunc(slices.Clone(result), func(e market.Entry) bool {
+			_, as := m.installedRecord(e)
+			return !f.Keeps(manager.ListingState(as != notInstalled, e.Manifest.Platforms, e.Manifest.MinHerdrVersion, m.herdrVersion, m.platform))
+		})
+	}
 	*c = searchCache{valid: true, query: query, order: m.order, version: m.entriesVersion,
-		result: market.Search(m.entries, query, m.order)}
+		installedGen: m.installedGen, herdrVersion: m.herdrVersion, result: result}
 	return c.result
 }
 
@@ -635,7 +670,7 @@ func (m *model) typedSource() (source.GitHub, bool) {
 // shownOrder is the order the marketplace list is in: without search terms,
 // relevance sorts by popularity.
 func (m *model) shownOrder() market.Order {
-	if m.order == market.ByRelevance && len(market.Terms(m.filters[tabBrowse].Value())) == 0 {
+	if m.order == market.ByRelevance && len(market.Terms(m.searchText())) == 0 {
 		return market.ByPopular
 	}
 	return m.order
@@ -645,7 +680,7 @@ func (m *model) shownOrder() market.Order {
 // relevance would sort as popular again, so it is passed over.
 func (m *model) nextOrder() market.Order {
 	next := m.shownOrder().Next()
-	if next == market.ByRelevance && len(market.Terms(m.filters[tabBrowse].Value())) == 0 {
+	if next == market.ByRelevance && len(market.Terms(m.searchText())) == 0 {
 		next = next.Next()
 	}
 	return next

@@ -62,6 +62,14 @@ follows in its state directory, and checks that ref for updates. A change
 whose ref could not be kept there fails and says how the plugin is followed
 instead. A plugin installed again outside hpm follows what herdr records.
 
+The filter of the installed list, `/`, and `hpm list` take `is:` terms along
+with words: `is:update`, `is:current` and `is:failed` for what the last update
+check found, `is:enabled`, `is:disabled`, `is:pinned`, `is:warning`,
+`is:compatible`, `is:incompatible` and `is:local`; `-is:` keeps the plugins
+not in the state. The marketplace search and `hpm search` take `is:installed`,
+`is:compatible` and `is:incompatible`, and rank the rest of the search as
+before.
+
 `D` shows the diagnostics `hpm doctor` prints: the herdr command and server
 and whether their versions agree, herdr's config as `herdr config check`
 reports it, keys bound to plugin actions no enabled plugin declares, git,
