@@ -284,7 +284,10 @@ func (c *cli) infoCmd() *cobra.Command {
 		Use:   "info <plugin-id | owner/repo[/subdir]>",
 		Short: "Show a plugin, installed or from GitHub",
 		Long: "Show an installed plugin by id, or preview a marketplace plugin or GitHub\n" +
-			"source: its manifest and the commands installing it would run.",
+			"source: its manifest and the commands installing it would run. The preview\n" +
+			"is of the latest release for a plugin at the repository root, otherwise the\n" +
+			"default branch. With --ref, an id is looked up in the marketplace even when\n" +
+			"that plugin is installed.",
 		Example: "  hpm info owner/repo\n" +
 			"  hpm info owner/repo --ref v1.2.0",
 		Args: cobra.ExactArgs(1),
@@ -309,7 +312,7 @@ func (c *cli) infoCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&ref, "ref", "", "branch, tag or commit to preview (default: what install picks)")
+	cmd.Flags().StringVar(&ref, "ref", "", "branch, tag or commit to preview instead of the default")
 	return cmd
 }
 
