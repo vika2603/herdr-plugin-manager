@@ -1227,6 +1227,9 @@ func TestVersionPickerShowsReleaseNotes(t *testing.T) {
 	h := start(t, b)
 	h.press("tab", "enter", "v")
 	out := h.screen()
+	if !strings.Contains(out, "Gadget › Versions") || strings.Contains(out, "README") {
+		t.Errorf("the picker should have its own breadcrumb and no Info and README tabs:\n%s", out)
+	}
 	for _, want := range []string{"Faster gadgets", "Gadgets start twice as fast."} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the notes of v1.1.0 lack %q:\n%s", want, out)
@@ -1236,7 +1239,11 @@ func TestVersionPickerShowsReleaseNotes(t *testing.T) {
 	if !strings.Contains(h.screen(), "This tag has no GitHub release") {
 		t.Errorf("v1.0.0 has no release:\n%s", h.screen())
 	}
-	h.press("esc", "v")
+	h.press("esc")
+	if out := h.words(); !strings.Contains(out, "Info README") {
+		t.Errorf("back in the details, the Info and README tabs are gone:\n%s", out)
+	}
+	h.press("v")
 	n := 0
 	for _, c := range b.Calls() {
 		if strings.HasPrefix(c, "releases") {

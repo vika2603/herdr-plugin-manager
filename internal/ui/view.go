@@ -81,6 +81,9 @@ func (m *model) bodyHeight() int {
 		chrome = listChrome
 	case screenDetail:
 		chrome = detailChrome
+		if m.detail != nil && m.detail.versions != nil {
+			chrome = otherChrome
+		}
 	case screenOutput, screenReview, screenHistory, screenDoctor:
 	}
 	return max(m.h()-chrome-len(m.helpLines()), 1)
@@ -543,9 +546,13 @@ func (m *model) viewDetail() string {
 }
 
 // detailHeader is the breadcrumb on a line of its own, then the README and
-// Info views as tabs.
+// Info views as tabs. The version picker, which is neither, has the
+// breadcrumb and a rule of the other screens.
 func (m *model) detailHeader(d *detail) []string {
 	t := m.theme
+	if d.versions != nil {
+		return m.crumbs(d.crumb+" › "+d.title, "Versions")
+	}
 	crumb := indent + t.faint.Render(d.crumb+" ›") + " " + t.bold.Render(d.title)
 	labels, underline := m.tabRow(d.views(), nil, int(d.view))
 	return []string{spread(crumb, m.versionLabel(), m.w()), "", labels, underline}

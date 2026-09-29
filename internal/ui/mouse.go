@@ -14,6 +14,8 @@ const (
 	listBodyTop   = 6
 	detailTabsRow = 2
 	detailBodyTop = 5
+	// pickerBodyTop is the version picker's, below a breadcrumb and a rule.
+	pickerBodyTop = 3
 	// versionsTop is the picker's first version below its heading and gap.
 	versionsTop = 2
 	// wheelLines is how far a wheel notch scrolls text.
@@ -101,7 +103,7 @@ func (m *model) clickList(ms tea.Mouse) tea.Cmd {
 func (m *model) clickDetail(ms tea.Mouse) tea.Cmd {
 	d := m.detail
 	if vp := d.versions; vp != nil {
-		row := ms.Y - detailBodyTop - versionsTop
+		row := ms.Y - pickerBodyTop - versionsTop
 		i := vp.offset + row
 		switch {
 		case ms.X >= vp.listWidth || vp.showingNotesOnly(m.w()) || row < 0 || i >= len(vp.rows):
