@@ -3,17 +3,20 @@
 
 id = "vika2603.plugin-manager"
 name = "Plugin Manager"
-version = "0.2.0"
+version = "0.3.0"
 # The socket client is generated against herdr 0.9.1 (protocol 22).
 min_herdr_version = "0.9.1"
 description = "Browse, install and update herdr plugins"
-# Windows is left out until the manager has been tested there.
-platforms = ["linux", "macos"]
+platforms = ["linux", "macos", "windows"]
 
-# Downloads the release binary for this version, or builds from source with
-# Go when there is none.
+# Build the checked-out source first; use a verified release when Go is absent.
 [[build]]
+platforms = ["linux", "macos"]
 command = ["sh", "scripts/install.sh"]
+
+[[build]]
+platforms = ["windows"]
+command = ["powershell", "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "scripts/build.ps1"]
 
 [[actions]]
 id = "open"

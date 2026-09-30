@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -105,16 +106,28 @@ func (u Usage) Sections() []Section {
 }
 
 // HerdrConfigPath is herdr's config file: $HERDR_CONFIG_PATH, else
-// config.toml in $XDG_CONFIG_HOME/herdr or ~/.config/herdr, as herdr 0.9
-// resolves it.
+// config.toml in $XDG_CONFIG_HOME/herdr, the Windows roaming application
+// data directory, or ~/.config/herdr, as herdr resolves it.
 func HerdrConfigPath() string {
-	if p := os.Getenv("HERDR_CONFIG_PATH"); p != "" {
+	return herdrConfigPath(runtime.GOOS, os.Getenv, os.UserHomeDir)
+}
+
+func herdrConfigPath(goos string, getenv func(string) string, userHomeDir func() (string, error)) string {
+	if p := getenv("HERDR_CONFIG_PATH"); p != "" {
 		return p
 	}
-	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
+	if dir := getenv("XDG_CONFIG_HOME"); dir != "" {
 		return filepath.Join(dir, "herdr", "config.toml")
 	}
-	home, err := os.UserHomeDir()
+	if goos == "windows" {
+		if dir := getenv("APPDATA"); dir != "" {
+			return filepath.Join(dir, "herdr", "config.toml")
+		}
+		if profile := getenv("USERPROFILE"); profile != "" {
+			return filepath.Join(profile, "AppData", "Roaming", "herdr", "config.toml")
+		}
+	}
+	home, err := userHomeDir()
 	if err != nil {
 		return filepath.Join("~", ".config", "herdr", "config.toml")
 	}

@@ -101,16 +101,21 @@ func newReadme(data []byte, location string) *Readme {
 
 // OpenURL opens url in the default browser.
 func (*Manager) OpenURL(ctx context.Context, url string) error {
-	var name string
-	switch runtime.GOOS {
-	case "darwin":
-		name = "open"
-	default:
-		name = "xdg-open"
-	}
-	cmd := exec.CommandContext(ctx, name, url) //nolint:gosec // The system's URL opener with a github.com URL built by source.GitHub.
+	name, args := urlOpener(runtime.GOOS, url)
+	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // The system's URL opener with a github.com URL built by source.GitHub.
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("open %s: %w: %s", url, err, safe.Line(string(out)))
 	}
 	return nil
+}
+
+func urlOpener(goos, url string) (name string, args []string) {
+	switch goos {
+	case "darwin":
+		return "open", []string{url}
+	case "windows":
+		return "rundll32.exe", []string{"url.dll,FileProtocolHandler", url}
+	default:
+		return "xdg-open", []string{url}
+	}
 }

@@ -14,8 +14,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
-	"time"
 
 	"github.com/vika2603/herdr-client/herdr"
 )
@@ -139,48 +137,22 @@ func (r Runner) run(ctx context.Context, args []string, out io.Writer) error {
 	return nil
 }
 
-// killDelay is how long a cancelled herdr command and the build it runs have
-// to stop after the interrupt before they are killed.
-const killDelay = 5 * time.Second
-
-// command is herdr with args, run in a process group of its own. herdr
-// neither handles an interrupt nor passes it on, so on cancellation the
-// whole group is interrupted, which reaches the build commands herdr runs,
-// and killed once killDelay passes. The group also keeps a terminal's
-// ctrl+c from reaching herdr before this process decides what to do.
+// command starts herdr separately from the manager's terminal and arranges
+// for cancellation to stop the build commands herdr starts as well.
 func (r Runner) command(ctx context.Context, args []string) *groupCmd {
 	cmd := exec.CommandContext(ctx, r.bin(), args...) //nolint:gosec // The herdr binary herdr itself names, or herdr on PATH, with fixed subcommands.
 	cmd.Env = commandEnv(os.Environ())
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	g := &groupCmd{Cmd: cmd}
-	cmd.Cancel = g.interrupt
-	cmd.WaitDelay = 10 * time.Second
-	return g
+	return newGroupCmd(cmd)
 }
 
-// groupCmd is a command leading its own process group.
+// groupCmd owns the process until Run has returned, so cancellation never
+// targets a process group after its leader has been reaped.
 type groupCmd struct {
 	*exec.Cmd
 	mu     sync.Mutex
 	exited bool
 }
 
-// interrupt sends the group an interrupt, and a kill after killDelay unless
-// the command has exited by then.
-func (g *groupCmd) interrupt() error {
-	pgid := g.Process.Pid
-	time.AfterFunc(killDelay, func() {
-		g.mu.Lock()
-		defer g.mu.Unlock()
-		if !g.exited {
-			_ = syscall.Kill(-pgid, syscall.SIGKILL)
-		}
-	})
-	return syscall.Kill(-pgid, syscall.SIGINT)
-}
-
-// Run runs the command. Once it has exited its process group id may be
-// reused, so no kill is sent after that.
 func (g *groupCmd) Run() error {
 	err := g.Cmd.Run()
 	g.mu.Lock()
@@ -228,9 +200,7 @@ func (e *ExitError) Error() string {
 func commandError(args []string, err error, output string) error {
 	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 		e := &ExitError{Args: args, Code: exitErr.ExitCode(), Output: strings.TrimSpace(output)}
-		if ws, ok := exitErr.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
-			e.Signal = ws.Signal()
-		}
+		e.Signal = processSignal(exitErr)
 		return e
 	}
 	return fmt.Errorf("run %s: %w", strings.Join(args, " "), err)

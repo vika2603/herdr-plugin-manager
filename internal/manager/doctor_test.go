@@ -55,6 +55,27 @@ command = "anything"
 	}
 }
 
+func TestCheckHistoryProbesWritableDirectoryAndCleansUp(t *testing.T) {
+	dir := t.TempDir()
+	m := &Manager{History: &History{Dir: dir}}
+	f := m.checkHistory()
+	if f.Health != Healthy || !strings.Contains(f.Summary, "0 changes recorded") {
+		t.Fatalf("writable history: %+v", f)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("write probe left files: entries=%v err=%v", entries, err)
+	}
+	file := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.History.Dir = file
+	if f := m.checkHistory(); f.Health != Failing || !strings.Contains(f.Summary, "cannot be written") {
+		t.Fatalf("file as history directory: %+v", f)
+	}
+}
+
 func TestCheckPluginsReportsWhatCannotRunHere(t *testing.T) {
 	ok := withActions()
 	ok.PluginRoot = t.TempDir()

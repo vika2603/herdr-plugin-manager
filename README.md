@@ -25,13 +25,17 @@ English | [简体中文](README.zh-CN.md)
 
 ## Install
 
-Requires herdr 0.9.1 or newer on macOS or Linux.
+Requires herdr 0.9.1 or newer on macOS, Linux or Windows. Installation builds
+the checked-out source when Go is available. Otherwise it downloads the
+matching release archive and verifies its SHA-256 checksum; that fallback
+requires a v0.3.0 or newer release.
 
 ```bash
 herdr plugin install vika2603/herdr-plugin-manager
 ```
 
-Bind a key to the popup in `~/.config/herdr/config.toml`:
+Bind a key to the popup in `~/.config/herdr/config.toml` (on Windows,
+`%APPDATA%\herdr\config.toml`):
 
 ```toml
 [[keys.command]]

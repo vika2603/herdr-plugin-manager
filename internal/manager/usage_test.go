@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -10,6 +11,39 @@ import (
 
 	"github.com/vika2603/herdr-client/herdr"
 )
+
+func TestHerdrConfigPathPlatformDefaults(t *testing.T) {
+	homePath, xdg, roaming, profile := "/home/test", "/xdg", "/roaming", "/profile"
+	home := func() (string, error) {
+		if homePath == "" {
+			return "", errors.New("no home")
+		}
+		return homePath, nil
+	}
+	tests := []struct {
+		name, goos string
+		env        map[string]string
+		want       string
+	}{
+		{"explicit path", "windows", map[string]string{"HERDR_CONFIG_PATH": "/override.toml", "XDG_CONFIG_HOME": "/xdg"}, "/override.toml"},
+		{"XDG override", "windows", map[string]string{"XDG_CONFIG_HOME": xdg, "APPDATA": roaming}, filepath.Join(xdg, "herdr", "config.toml")},
+		{"Windows roaming data", "windows", map[string]string{"APPDATA": roaming, "USERPROFILE": profile}, filepath.Join(roaming, "herdr", "config.toml")},
+		{"Windows profile", "windows", map[string]string{"USERPROFILE": profile}, filepath.Join(profile, "AppData", "Roaming", "herdr", "config.toml")},
+		{"Unix home", "linux", map[string]string{"APPDATA": roaming}, filepath.Join(homePath, ".config", "herdr", "config.toml")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := herdrConfigPath(tt.goos, func(k string) string { return tt.env[k] }, home)
+			if got != tt.want {
+				t.Fatalf("herdrConfigPath() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+	homePath = ""
+	if got := herdrConfigPath("windows", func(string) string { return "" }, home); got != filepath.Join("~", ".config", "herdr", "config.toml") {
+		t.Fatalf("no home: got %q", got)
+	}
+}
 
 func withActions(ids ...string) herdr.InstalledPluginInfo {
 	p := at("v1.0.0", commitV1, true)

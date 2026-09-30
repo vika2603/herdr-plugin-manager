@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/vika2603/herdr-client/herdr"
@@ -230,7 +229,7 @@ func (m *Manager) checkHistory() Finding {
 	case err != nil:
 		f.Health, f.Summary = Failing, "the state directory cannot be read: "+err.Error()
 		return f
-	case !info.IsDir() || syscall.Access(h.Dir, 2) != nil: // 2 is W_OK.
+	case !info.IsDir() || !directoryWritable(h.Dir):
 		f.Health, f.Summary = Failing, h.Dir+" cannot be written to, so changes are not recorded"
 		return f
 	}
@@ -245,6 +244,19 @@ func (m *Manager) checkHistory() Finding {
 		f.Details = []string{"the refs kept for plugins installed at a commit cannot be read, so they are listed as pinned: " + err.Error()}
 	}
 	return f
+}
+
+// directoryWritable tests the actual ability to create history files. File
+// mode bits alone cannot establish this on Windows or with ACLs.
+func directoryWritable(dir string) bool {
+	f, err := os.CreateTemp(dir, ".hpm-write-*")
+	if err != nil {
+		return false
+	}
+	name := f.Name()
+	closeErr := f.Close()
+	removeErr := os.Remove(name)
+	return closeErr == nil && removeErr == nil
 }
 
 // checkPlugins reports each installed plugin that cannot run here, whose

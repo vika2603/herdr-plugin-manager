@@ -40,7 +40,7 @@ func (h *History) follows() (map[string]Follow, error) {
 	if h == nil || h.Dir == "" {
 		return out, nil
 	}
-	data, err := os.ReadFile(h.followsPath())
+	data, err := readHistoryFile(h.followsPath())
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return out, nil

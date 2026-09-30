@@ -3,7 +3,6 @@ package manager
 import (
 	"os"
 	"path/filepath"
-	"syscall"
 )
 
 // lockFile is the file whose lock serialises the changes to the history
@@ -21,12 +20,13 @@ func (h *History) lock() (unlock func(), err error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	unlockFile, err := lockHistoryFile(f)
+	if err != nil {
 		_ = f.Close()
 		return nil, err
 	}
 	return func() {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		unlockFile()
 		_ = f.Close()
 	}, nil
 }

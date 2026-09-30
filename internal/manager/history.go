@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -185,7 +186,7 @@ func (h *History) reserve(e *Entry) *os.File {
 // trim cuts the log back once it has grown past historyMax entries,
 // dropping their output files with them.
 func (h *History) trim(path string) error {
-	data, err := os.ReadFile(path) //nolint:gosec // The log in the history directory.
+	data, err := readHistoryFile(path)
 	if err != nil {
 		return err
 	}
@@ -201,7 +202,7 @@ func (h *History) trim(path string) error {
 	}
 	kept := append(bytes.Join(lines[len(lines)-historyKeep:], []byte("\n")), '\n')
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, kept, 0o600); err != nil { //nolint:gosec // Beside the log in the history directory.
+	if err := os.WriteFile(tmp, kept, 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)
@@ -213,7 +214,7 @@ func (h *History) List() ([]Entry, error) {
 	if h == nil || h.Dir == "" {
 		return nil, nil
 	}
-	f, err := os.Open(filepath.Join(h.Dir, historyFile))
+	f, err := openHistoryRead(filepath.Join(h.Dir, historyFile))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
@@ -272,3 +273,12 @@ func (e Entry) changed() bool {
 }
 
 func (h *History) logDir() string { return filepath.Join(h.Dir, "logs") }
+
+func readHistoryFile(path string) ([]byte, error) {
+	f, err := openHistoryRead(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	return io.ReadAll(f)
+}

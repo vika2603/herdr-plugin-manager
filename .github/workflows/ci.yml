@@ -21,3 +21,15 @@ jobs:
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.14.0
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build with the manifest command
+        run: powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/build.ps1
+      - run: go vet ./...
+      - run: go test ./...

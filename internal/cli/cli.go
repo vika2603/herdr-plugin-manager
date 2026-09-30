@@ -877,8 +877,8 @@ func (c *cli) historyCmd() *cobra.Command {
 		Use:   "history [plugin-id]",
 		Short: "List the changes hpm made",
 		Long: "List the changes hpm made, newest first, with each plugin's state before and\n" +
-			"after. The history is kept in $XDG_STATE_HOME/herdr-plugin-manager, by default\n" +
-			"~/.local/state/herdr-plugin-manager.",
+			"after. An absolute $XDG_STATE_HOME overrides the default directory.\n" +
+			"By default, it uses ~/.local/state on Unix or %LOCALAPPDATA% on Windows.",
 		Example: "  hpm history example.theme\n" +
 			"  hpm history --show ID",
 		Args: cobra.MaximumNArgs(1),

@@ -24,13 +24,14 @@
 
 ## 安装
 
-需要 herdr 0.9.1 或更新版本，macOS 或 Linux。
+需要 herdr 0.9.1 或更新版本，支持 macOS、Linux 和 Windows。有 Go 时安装程序会编译当前 checkout；
+否则下载对应版本的 release 并校验 SHA-256。预编译包的后备安装需要 v0.3.0 或更新的 release。
 
 ```bash
 herdr plugin install vika2603/herdr-plugin-manager
 ```
 
-在 `~/.config/herdr/config.toml` 里给弹窗绑定按键：
+在 `~/.config/herdr/config.toml`（Windows 为 `%APPDATA%\herdr\config.toml`）里给弹窗绑定按键：
 
 ```toml
 [[keys.command]]
