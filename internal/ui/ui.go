@@ -319,6 +319,7 @@ func newModel(ctx context.Context, b Backend, opts Options) *model {
 	}
 	for i := range m.filters {
 		f := textinput.New()
+		f.SetVirtualCursor(false)
 		f.Placeholder = "filter by name, or is:update, is:disabled, is:warning, is:incompatible"
 		m.filters[i] = f
 	}

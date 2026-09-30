@@ -37,6 +37,7 @@ const (
 
 func (m *model) View() tea.View {
 	var content string
+	var cursor *tea.Cursor
 	switch m.screen {
 	case screenDetail:
 		content = m.viewDetail()
@@ -49,9 +50,10 @@ func (m *model) View() tea.View {
 	case screenDoctor:
 		content = m.viewDoctor()
 	default:
-		content = m.viewList()
+		content, cursor = m.viewList()
 	}
 	v := tea.NewView(content)
+	v.Cursor = cursor
 	v.AltScreen = m.opts.AltScreen
 	// Holding shift, or option in some terminals, still selects text.
 	v.MouseMode = tea.MouseModeCellMotion
@@ -346,7 +348,7 @@ func (m *model) statusLine() string {
 	return " " + t.faint.Render("Index from "+m.indexStatus.FetchedAt.Format(time.DateTime)+" · listings are not reviewed by herdr")
 }
 
-func (m *model) viewList() string {
+func (m *model) viewList() (string, *tea.Cursor) {
 	t := m.theme
 	f := m.filters[m.tab]
 	var count string
@@ -361,18 +363,21 @@ func (m *model) viewList() string {
 		count += " · by " + order
 	}
 	right := t.faint.Render(count + " ")
-	f.SetWidth(max(m.w()-ansi.StringWidth(right)-6, 10))
-	left := indent + f.View()
+	leftRoom := max(m.w()-ansi.StringWidth(right)-1, 0)
+	var left string
+	column := -1
 	switch {
-	case !f.Focused() && f.Value() == "":
+	case f.Focused():
+		left, column = m.focusedFilter(leftRoom)
+	case f.Value() == "":
 		left = indent + t.accent.Render(f.Prompt) + t.faint.Render(f.Placeholder)
-	case !f.Focused():
+	default:
 		// The search is kept while browsing its results; say how to change
 		// or drop it.
 		left = indent + t.accent.Render(f.Prompt) + t.text.Render(f.Value()) + t.faint.Render(m.keyHint(actSearch, "edits")+m.keyHint(actClose, "clears"))
 	}
 	// The count and order stay; a hint too long for the rest is cut short.
-	left = ansi.Truncate(left, max(m.w()-ansi.StringWidth(right)-1, 0), "…")
+	left = ansi.Truncate(left, leftRoom, "…")
 	filter := spread(left, right, m.w())
 
 	var body []string
@@ -381,7 +386,43 @@ func (m *model) viewList() string {
 	} else {
 		body = m.browseBody()
 	}
-	return m.frame(m.tabBar(), &filter, body)
+	header := m.tabBar()
+	content := m.frame(header, &filter, body)
+	var cursor *tea.Cursor
+	if m.confirm == nil && column >= 0 && column < m.w() &&
+		strings.Count(content, "\n") < m.h() {
+		cursor = tea.NewCursor(column, len(header)+1)
+	}
+	return content, cursor
+}
+
+// focusedFilter lays out the visible value and insertion point together.
+// The textinput keeps editing in rune offsets; terminal cursor positions need
+// cell widths relative to the visible window, including wide characters.
+func (m *model) focusedFilter(width int) (line string, column int) {
+	f := m.filters[m.tab]
+	s := f.Styles().Focused
+	lead := indent + s.Prompt.Render(f.Prompt)
+	leadWidth := ansi.StringWidth(lead)
+	room := width - leadWidth
+	if room <= 0 {
+		return lead, -1
+	}
+	if f.Value() == "" {
+		return lead + s.Placeholder.Render(ansi.Truncate(f.Placeholder, room, "")), leadWidth
+	}
+	runes := []rune(f.Value())
+	at := min(max(f.Position(), 0), len(runes))
+	from := 0
+	for from < at && ansi.StringWidth(string(runes[from:at]))+1 > room {
+		from++
+	}
+	to := at
+	for to < len(runes) && ansi.StringWidth(string(runes[from:to+1]))+1 <= room {
+		to++
+	}
+	column = leadWidth + ansi.StringWidth(string(runes[from:at]))
+	return lead + s.Text.Render(string(runes[from:to])), column
 }
 
 func counted(shown, total int, noun string) string {
