@@ -205,7 +205,7 @@ func (h *History) trim(path string) error {
 	if err := os.WriteFile(tmp, kept, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	return replaceHistoryFile(tmp, path)
 }
 
 // List returns the recorded changes, the oldest first. Lines that cannot be

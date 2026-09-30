@@ -85,7 +85,7 @@ func (h *History) setFollow(id string, f *Follow) error {
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, h.followsPath())
+	return replaceHistoryFile(tmp, h.followsPath())
 }
 
 // applyFollows gives each plugin that is still at the pin this manager made
