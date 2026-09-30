@@ -3,7 +3,7 @@
 
 id = "vika2603.plugin-manager"
 name = "Plugin Manager"
-version = "0.3.0"
+version = "0.3.1"
 # The socket client is generated against herdr 0.9.1 (protocol 22).
 min_herdr_version = "0.9.1"
 description = "Browse, install and update herdr plugins"
