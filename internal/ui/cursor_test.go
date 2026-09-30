@@ -25,8 +25,6 @@ func TestSearchFrameRequestsNativeBlinkingBlock(t *testing.T) {
 	if _, err := program.Run(); err != nil {
 		t.Fatal(err)
 	}
-	// DECSCUSR 1 requests a blinking block. The framework owns this protocol,
-	// including cleanup, instead of an application timer or output wrapper.
 	if !strings.Contains(out.String(), "\x1b[1 q") {
 		t.Fatalf("native renderer never requested a blinking block: %q", out.String())
 	}

@@ -396,9 +396,6 @@ func (m *model) viewList() (string, *tea.Cursor) {
 	return content, cursor
 }
 
-// focusedFilter lays out the visible value and insertion point together.
-// The textinput keeps editing in rune offsets; terminal cursor positions need
-// cell widths relative to the visible window, including wide characters.
 func (m *model) focusedFilter(width int) (line string, column int) {
 	f := m.filters[m.tab]
 	s := f.Styles().Focused
